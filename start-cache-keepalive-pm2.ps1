@@ -57,7 +57,8 @@ if (Test-PipeCapture) {
     '请在窗口里双击 start-cache-keepalive-pm2.bat 运行；自动化请直接用 pm2 命令。')
 }
 
-$ping = Invoke-Pm2 $pm2 @('ping')
+$pingTimeout = if ($Action -eq 'stop') { 10000 } else { 60000 }
+$ping = Invoke-Pm2 $pm2 @('ping') $pingTimeout
 if (-not ($ping.Ok -and $ping.Code -eq 0)) {
   if ($Action -in @('up', 'restart')) {
     Fail ('pm2 daemon 不可达（connect EPERM \\\.\\pipe\\rpc.sock）。先右键「以管理员身份运行」' +
@@ -88,8 +89,15 @@ switch ($Action) {
     if (-not $r.Ok -or $r.Code -ne 0) { Fail "pm2 命令失败：$((($r.Err + $r.Out) -replace '\s+', ' ').Trim())" }
   }
   'stop' {
-    $d = Invoke-Pm2 $pm2 @('describe', $script:Pm2App)
-    if ($d.Ok -and $d.Code -eq 0) { $null = Invoke-Pm2 $pm2 @('delete', $script:Pm2App) }
+    Say '  正在停止…' -ForegroundColor DarkGray
+    $d = Invoke-Pm2 $pm2 @('describe', $script:Pm2App) 10000
+    if ($d.Ok -and $d.Code -eq 0) {
+      $null = Invoke-Pm2 $pm2 @('delete', $script:Pm2App) 10000
+      Say '已从 pm2 中移除。'
+    }
+    elseif (-not $d.Ok) {
+      Say '  pm2 daemon 无响应（可能正在启动中），跳过 pm2 侧清理。'
+    }
     else { Say '（本来就不在 pm2 里）' }
   }
   'logs' {

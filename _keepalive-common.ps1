@@ -86,7 +86,13 @@ function Get-Pm2TargetPids([string] $Pm2) {
   , $pids
 }
 
-function Hold-Open([switch] $NoPause) { if (-not $NoPause) { $null = Read-Host '按回车关闭窗口' } }
+function Hold-Open([switch] $NoPause) {
+    if ($NoPause) { return }
+    # 非交互式环境（管道/重定向/自动化调用）不等回车，避免挂死
+    if ([Console]::IsInputRedirected) { return }
+    try { $null = Read-Host '按回车关闭窗口' }
+    catch { }
+}
 
 # stdout 被管道/文件捕获时为真。此环境下启动 pm2 daemon 会让 daemon 继承那根写端句柄（Windows 句柄表继承，不受 stdio 重定向影响），
 # 调用方等到 EOF 就永不返回。故本环境下不主动 spawn daemon。

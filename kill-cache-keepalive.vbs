@@ -1,5 +1,5 @@
-' 缓存保温 停止脚本 (通过端口)
-' 功能：找到占用 19388-19392 的缓存保温进程并终止（支持多个 PID），结果弹框。
+' 缓存保温 停止脚本（全杀）
+' 功能：pm2 应用 + 进程 + pm2 daemon + 端口兜底，全部清理。
 ' 用法：双击即可（自动请求管理员权限）；加 /silent 则不弹框。
 ' 实现：直接用 Exec 同步调 kill-cache-keepalive.ps1，从 stdout 的 "pid=" 片段取被杀 PID（不靠重定向文件，避开 cmd 引号地狱）。
 
@@ -33,7 +33,7 @@ If Not fso.FileExists(ps1) Then
     WScript.Quit 1
 End If
 
-Set exec = sh.Exec("powershell -NoProfile -ExecutionPolicy Bypass -File """ & ps1 & """ -Pm2 -NoPause")
+Set exec = sh.Exec("powershell -NoProfile -ExecutionPolicy Bypass -File """ & ps1 & """ -NoPause")
 output = exec.StdOut.ReadAll
 
 ' 只认 ASCII 片段 "pid="，中文部分可能因编码变乱码，不影响定位

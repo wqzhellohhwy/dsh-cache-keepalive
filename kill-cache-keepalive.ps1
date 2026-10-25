@@ -1,15 +1,12 @@
 ﻿<#
 .SYNOPSIS
-  清理缓存保温进程。默认只清「普通启动」那份，-Pm2 连 pm2 应用与 daemon 一起清。
-
-.PARAMETER Pm2
-  同时清理 pm2 侧的 keepalive：pm2 应用、pm2 托管的进程、pm2 daemon。
+  清理缓存保温进程。全杀：pm2 应用 + 进程 + pm2 daemon + 端口兜底。
 
 .PARAMETER Force
   pm2 不可达时，强制按 ProcessContainerFork 猜归属杀掉 pm2 托管进程（会连带别人的 pm2 应用）。
 
 .PARAMETER KeepDaemon
-  保留 pm2 daemon（需 -Pm2）。daemon 不可达时拒绝执行：那种状态下强杀后会被 autorestart 拉回。
+  保留 pm2 daemon。daemon 不可达时拒绝执行：那种状态下强杀后会被 autorestart 拉回。
 
 .PARAMETER DryRun
   只列清单，不动手，也不调 pm2（EPERM 状态下连 ping 都会新 spawn 一个 daemon）。
@@ -22,7 +19,6 @@
 #>
 [CmdletBinding()]
 param(
-  [switch] $Pm2,
   [switch] $Force,
   [switch] $KeepDaemon,
   [switch] $DryRun,
@@ -36,8 +32,11 @@ $isAdmin = $false
 try { $isAdmin = (New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
 
 Say ''
-Say ('缓存保温 · 清理' + $(if ($Pm2) { '（含 pm2：应用 + 进程 + daemon）' } else { '（只清普通启动那份，不碰 pm2）' }))
+Say '缓存保温 · 清理（全杀：pm2 应用 + 进程 + daemon + 端口）'
 Say ("  身份  " + $(if ($isAdmin) { '管理员' } else { '普通权限（杀 pm2 daemon 需要管理员）' }))
+if (-not $isAdmin) {
+  Say '  ⚠️  杀 pm2 daemon 需要管理员权限。请右键「以管理员身份运行」本脚本，或运行 kill-cache-keepalive.bat（快捷方式已勾选管理员）。' -ForegroundColor Red
+}
 Say ("  模式  " + $(if ($DryRun) { '演练（不动手，也不调 pm2）' } else { '执行' }) + $(if ($KeepDaemon) { ' · 保留 pm2 daemon' } else { '' }))
 Say ''
 
@@ -49,8 +48,7 @@ $listen = Get-ListenInRange
 $targetPids = $null
 $daemonOk = $false
 $pipe = Test-PipeCapture
-if (-not $Pm2) { Say '[1/4] pm2 应用：跳过（未加 -Pm2）' }
-elseif (-not $pm2Exe) { Say '[1/4] pm2 应用：找不到 pm2 → 跳过' }
+if (-not $pm2Exe) { Say '[1/4] pm2 应用：找不到 pm2 → 跳过' }
 elseif ($DryRun) { Say '[1/4] pm2 应用：[dry-run] 不调 pm2' }
 elseif ($pipe) { Say '[1/4] pm2 应用：输出被重定向，不调 pm2（会 spawn daemon 并挂死调用方）→ 改由进程与端口兜底' }
 else {
@@ -73,18 +71,16 @@ Say ''
 Say '[2/4] 进程'
 $victims = @{}
 foreach ($p in @(Get-DirectKeepalive $nodes)) { $victims[[int]$p.ProcessId] = 'node 直跑 cli\keepalive.mjs' }
-if ($Pm2) {
-  $forks = @(Get-Pm2Forks $nodes)
-  if ($null -ne $targetPids) {
-    foreach ($p in $forks) { if ($targetPids -contains [int]$p.ProcessId) { $victims[[int]$p.ProcessId] = 'pm2 托管（jlist 认到本插件应用）' } }
-  }
-  elseif ($Force) {
-    foreach ($p in $forks) { $victims[[int]$p.ProcessId] = 'pm2 托管（-Force，未核实归属）' }
-  }
-  elseif ($forks.Count -gt 0) {
-    Say ("  $($forks.Count) 个 pm2 托管进程归属未核实（pid $(($forks | ForEach-Object { $_.ProcessId }) -join ','))")
-    Say '  → 加 -Force 可强制杀（会连带别人的 pm2 应用）；或先让 pm2 恢复可达'
-  }
+$forks = @(Get-Pm2Forks $nodes)
+if ($null -ne $targetPids) {
+  foreach ($p in $forks) { if ($targetPids -contains [int]$p.ProcessId) { $victims[[int]$p.ProcessId] = 'pm2 托管（jlist 认到本插件应用）' } }
+}
+elseif ($Force) {
+  foreach ($p in $forks) { $victims[[int]$p.ProcessId] = 'pm2 托管（-Force，未核实归属）' }
+}
+elseif ($forks.Count -gt 0) {
+  Say ("  $($forks.Count) 个 pm2 托管进程归属未核实（pid $(($forks | ForEach-Object { $_.ProcessId }) -join ','))")
+  Say '  → 加 -Force 可强制杀（会连带别人的 pm2 应用）；或先让 pm2 恢复可达'
 }
 if ($victims.Count -eq 0) { Say '  无' }
 else { foreach ($k in @($victims.Keys)) { Stop-One $nodes[$k] $victims[$k] -DryRun:$DryRun } }
@@ -93,8 +89,7 @@ else { foreach ($k in @($victims.Keys)) { Stop-One $nodes[$k] $victims[$k] -DryR
 Say ''
 Say '[3/4] pm2 daemon'
 $daemons = @(Get-Pm2Daemons $nodes)
-if (-not $Pm2) { Say '  跳过（未加 -Pm2）' }
-elseif ($KeepDaemon) { Say "  保留（-KeepDaemon）；当前 $($daemons.Count) 个" }
+if ($KeepDaemon) { Say "  保留（-KeepDaemon）；当前 $($daemons.Count) 个" }
 elseif ($daemons.Count -eq 0) { Say '  无' }
 else {
   Say "  发现 $($daemons.Count) 个 —— 同一 daemon 管理的其他 pm2 应用也会被停止"
@@ -109,13 +104,13 @@ foreach ($c in $listen) {
   if (-not $p) { continue }
   if ($victims.Contains([int]$p.ProcessId)) { continue }
   if (Test-IsKeepaliveCmd $p.CommandLine) { Stop-One $p "占着端口 $($c.LocalPort)" -DryRun:$DryRun }
-  elseif ($Pm2 -and $p.CommandLine -match 'ProcessContainerFork') {
+  elseif ($p.CommandLine -match 'ProcessContainerFork') {
     Say "  端口 $($c.LocalPort) 被 pm2 托管进程 pid=$($p.ProcessId) 占用；归属未核实，未处理"
   }
 }
 
 # ── 安全闸：-KeepDaemon 与「daemon 不可达」不能同时成立
-if ($Pm2 -and $KeepDaemon -and -not $DryRun -and -not $daemonOk) {
+if ($KeepDaemon -and -not $DryRun -and -not $daemonOk) {
   Say ''
   Say '[拒绝] -KeepDaemon 与「daemon 不可达」同时成立时无法保证清理：' -ForegroundColor Red
   Say '       pm2 托管的 keepalive 被强杀后，存活 daemon 会按 autorestart 拉回来（最多 10 次）。'

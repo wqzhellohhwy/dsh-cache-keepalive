@@ -5,6 +5,7 @@ rem No pause here: the ps1 prompts "press Enter" on every exit path and skips it
 rem ASCII-only on purpose so it renders in any console code page.
 setlocal EnableExtensions
 cd /d "%~dp0"
+chcp 65001 >nul
 set "PS1=%~dp0start-cache-keepalive-pm2.ps1"
 if not exist "%PS1%" goto :nops1
 set "PWSH=%ProgramFiles%\PowerShell\7\pwsh.exe"
