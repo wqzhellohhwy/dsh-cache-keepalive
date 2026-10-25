@@ -1426,7 +1426,7 @@ function mergeState(mem: State, disk: State): State {
          * 用户按模型填了间隔却看到全局值 = 「以为没生效」。
          */
         intervalSeconds: (() => {
-          const m = readSessionModel(row?.logFile ?? '')
+          const m = readSessionModel(meta?.logFile ?? '')
           /** model 的兜底：日志头常拿不到，账本末条一直记着。 */
           const lastLed = led[led.length - 1]
           const model = m?.model ?? lastLed?.model
