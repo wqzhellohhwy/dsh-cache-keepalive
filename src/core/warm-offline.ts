@@ -339,7 +339,12 @@ export function buildRequest(kind: ApiKind, o: BuildRequestOptions): BuiltReques
     ...(o.reasoningEffort === undefined ? {} : { reasoningEffort: o.reasoningEffort }),
     ...(o.resolveImage === undefined ? {} : { resolveImage: o.resolveImage }),
   })
-  body.stream = false
+  /**
+   * **`stream` 对齐 DSH adapter**：`dsh-llm-deepseek/lib/index.js:1704` 恒发 `stream: true`。
+   * 离线保温只要 usage、非流式更省事，但**参数不一致会让人分不清「保温请求是否与真实请求同源」**——
+   * 排查命中率时这个位是噪声。所以跟 adapter 保持一致。
+   */
+  body.stream = true
   return {
     url: root + '/v1/messages',
     headers: { 'content-type': json, 'x-api-key': o.apiKey, 'anthropic-version': '2023-06-01' },

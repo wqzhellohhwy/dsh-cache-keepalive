@@ -266,7 +266,11 @@ test('B3：anthropic-messages → /v1/messages + x-api-key + anthropic-version',
   assert.equal(r.headers['anthropic-version'], '2023-06-01')
   assert.equal(r.headers.authorization, undefined, 'anthropic 不用 Bearer')
   const body = JSON.parse(r.body)
-  assert.equal(body.stream, false)
+  /**
+   * `stream` 必须与 DSH adapter 一致：`dsh-llm-deepseek/lib/index.js:1704` 恒发 `stream: true`。
+   * 离线保温只要 usage、非流式更省事，但参数不一致会让「保温请求与真实请求是否同源」无从判断。
+   */
+  assert.equal(body.stream, true)
   assert.equal(body.max_tokens, 1)
   assert.equal(body.max_output_tokens, undefined)
   assert.equal(body.input, undefined)

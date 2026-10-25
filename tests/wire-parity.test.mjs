@@ -29,6 +29,7 @@ import {
   thinkingParamsOf,
 } from '../src/core/provider-meta.ts'
 import { parseProviders } from '../src/core/providers.ts'
+import { serializeForApi } from '../src/core/wire.ts'
 import { serializeForOpenAI } from '../src/core/wire-openai.ts'
 import { wireShapeOf } from '../src/core/warm-offline.ts'
 import { fingerprintOf, isCurrentFingerprint } from '../src/core/fingerprint.ts'
@@ -396,4 +397,68 @@ test('FP5：旧账本无前缀指纹一律豁免（升级那一刻零停保）',
   assert.equal(stale('3:3:deadbeefdeadbeef'), true, '同版本但值不同 → 照拦')
   assert.equal(stale('2:deadbeefdeadbeef'), false, '旧版本格式（单版本 `2:`）→ 豁免：升级那一刻零停保')
   assert.equal(stale(cur), false, '同版本且相同 → 放行')
+})
+
+// ── body 形状：与 DSH adapter 逐字段对齐（`dsh-llm-deepseek/lib/index.js:1702-1718`）──
+test('BODY：serializeForApi 的顶层形状与 deepseek-messages adapter 一致', () => {
+  const body = serializeForApi([
+    { role: 'system', content: [{ type: 'text', text: 'SYS' }] },
+    { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+    { role: 'assistant', content: [{ type: 'reasoning', text: 'think' }, { type: 'text', text: 'ok' }] },
+    { role: 'user', content: [{ type: 'text', text: 'again' }] },
+  ], {
+    model: 'deepseek-flash',
+    maxTokens: 1,
+    system: 'SYS',
+    tools: [{ name: 't', description: 'd', parameters: { type: 'object' } }],
+    reasoningEffort: 'high',
+  })
+  /** ① 七字段 */
+  assert.equal(body.model, 'deepseek-flash')
+  assert.ok(Array.isArray(body.messages))
+  assert.equal(body.max_tokens, 1)
+  assert.deepEqual(body.thinking, { type: 'enabled' })
+  assert.deepEqual(body.output_config, { effort: 'high' })
+  /** system = `options.system` + 历史 system 快照 拼 `\n\n`（adapter:1701 `[options.system, historySystem].filter(Boolean).join("\n\n")`） */
+  assert.equal(body.system, 'SYS\n\nSYS')
+  /** ② tools 用 input_schema（adapter:1715 `input_schema: tool.parameters`） */
+  assert.deepEqual(Object.keys(body.tools[0]).sort(), ['description', 'input_schema', 'name'])
+  assert.equal(body.tools[0].input_schema.type, 'object')
+  /** ③ reasoning → thinking 块（adapter:1547-1551） */
+  const think = body.messages.flatMap((m) => m.content).find((b) => b.type === 'thinking')
+  assert.ok(think !== undefined, 'reasoning 必须变成 thinking 块')
+  assert.equal(think.thinking, 'think')
+  /** ④ 同 role 合并（adapter:1675）：两条 user 中间没有 assistant 时会被并成一条 */
+  const merged = serializeForApi([
+    { role: 'user', content: [{ type: 'text', text: 'a' }] },
+    { role: 'user', content: [{ type: 'text', text: 'b' }] },
+  ], { model: 'm', maxTokens: 1 })
+  assert.equal(merged.messages.length, 1, '连续同 role 必须合并成一条')
+  assert.equal(merged.messages[0].content.length, 2)
+  /** ⑤ 空 user 消息被跳过（adapter:1672） */
+  const skipped = serializeForApi([
+    { role: 'user', content: [{ type: 'text', text: '' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'x' }] },
+  ], { model: 'm', maxTokens: 1 })
+  assert.equal(skipped.messages.filter((m) => m.role === 'user').length, 0, '空 user 必须被跳过')
+  /** ⑥ effort=off → thinking disabled 且不带 output_config（adapter:1707-1708） */
+  const off = serializeForApi([{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    { model: 'm', maxTokens: 1, reasoningEffort: 'off' })
+  assert.deepEqual(off.thinking, { type: 'disabled' })
+  assert.equal(off.output_config, undefined, 'effort=off 不许带 output_config')
+})
+
+// ── 保温请求的 stream 必须与 adapter 一致（adapter:1704 恒 true）──
+test('BODY：buildRequest(anthropic-messages) 的 stream 与 adapter 一致（true）', async () => {
+  const { buildRequest } = await import('../src/core/warm-offline.ts')
+  const req = buildRequest('anthropic-messages', {
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    model: 'deepseek-flash', tools: [], maxTokens: 1,
+    wireShape: { instructionRole: 'system', maxTokensField: 'max_tokens' },
+    baseURL: 'https://api.deepseek.com/anthropic', apiKey: 'sk-x',
+  })
+  const body = JSON.parse(req.body)
+  assert.equal(body.stream, true, 'adapter 恒发 stream:true，离线保温必须一致')
+  assert.deepEqual(Object.keys(req.headers).sort(), ['anthropic-version', 'content-type', 'x-api-key'])
+  assert.equal(req.headers['anthropic-version'], '2023-06-01')
 })

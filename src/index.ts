@@ -1031,6 +1031,8 @@ function mergeState(mem: State, disk: State): State {
       return { result: `试验护栏拦截（${lg.step}）：${lg.why}` }
     }
     let llmErr = ''
+    /** 在 try 外可见：兜底判据要用它区分「没有 provider/model」与「装配/序列化崩了」。 */
+    let plan: ReturnType<typeof planReplayFromAssembled> = null
     try {
       const assembled = await assembleSession(row.logFile, prompt)
       if (assembled.error !== undefined) llmErr = '装配失败：' + assembled.error
@@ -1060,7 +1062,7 @@ function mergeState(mem: State, disk: State): State {
        * 保留 attachment 块），适配器会自己去附件库取图 —— 前缀与真实请求一致。
        * 图片拦截只对「自己序列化成请求体」的路径有意义（`warmOffline` / CLI 直连）。
        */
-      const plan = planReplayFromAssembled(assembled, row.id, prompt, maxTokens)
+      plan = planReplayFromAssembled(assembled, row.id, prompt, maxTokens)
       if (plan === null) llmErr = '装配结果没有 provider/model（config=' + JSON.stringify(assembled.config) + '）'
       if (plan !== null) {
         const out = await runReplay(ctx.llm as never, plan)
@@ -1079,6 +1081,21 @@ function mergeState(mem: State, disk: State): State {
     } catch (e) {
       llmErr = e instanceof Error ? e.message : String(e)
       log(`离线会话 ${shortId(row.id)} 装配/发送失败：${llmErr}（改试直连 DeepSeek）`)
+    }
+    /**
+     * **禁止静默 fallback**：只有两种情形才允许落到「自己拼请求体」的直连兜底 ——
+     *   ① `planReplayFromAssembled` 返回 null（装配结果里没有 provider/model，没有 adapter 可走）；
+     *   ② DSH 适配器**明确不支持**这条路由（`UNSUPPORTED_*`）。
+     * 其余（装配崩溃 / 序列化异常 / 请求失败）**必须报错跳过**：自拼的 body 与 adapter 输出
+     * 并不保证同源，静默兜底会花真钱、却让人以为"保温成功"（实测一条会话 713,796 token 只命中 11,008）。
+     */
+    const canFallback = !llmErr.startsWith('装配失败：')
+      && (plan === null || /UNSUPPORTED_|not supported|不支持/iu.test(llmErr))
+    if (!canFallback) {
+      return {
+        result: '离线保温放弃（不走自拼请求体兜底）：' + (llmErr === '' ? '未知原因' : llmErr),
+        fatal: true,
+      }
     }
     /** 兜底：直连 DeepSeek（第三方 provider 没有配置或 DSH llm 不可用时走这条）。 */
     const r = await warmOffline({
