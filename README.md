@@ -129,6 +129,9 @@ http://127.0.0.1:19388/api/cache-keepalive/panel
   这条是为了让「面板地址」永远可预测 —— 旧行为（占用了就悄悄 +1）会让面板地址漂移，排查时对不上。
 - **`--serve` 默认不保温**：只起面板便于先看清账本与门禁结论；确认无误后再加 `--auto`。
 - `--loop` 固定**晚插件 90 秒**起拍（读 `runtime.json` 锚点），避免两边同一时刻保同一条会话。
+- **守护循环的日志想留档**：加 `--log-file <path>`（把 console 输出**同时**追加进该文件，带 ISO 时间戳；
+  目录会自动创建）。适合计划任务 / pm2 / 双击 bat 启动（没有终端可看的场景）：
+  `node cli/keepalive.mjs --serve --auto --log-file .tmp\keepalive.log --yes-i-will-pay`
 
 ## 普通启动（前台，不用 pm2）
 

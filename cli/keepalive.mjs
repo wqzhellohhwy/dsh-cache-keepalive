@@ -1645,6 +1645,8 @@ function parseArgs(argv) {
     mode: undefined, id: undefined, force: false, interval: DEFAULT_TICK,
     /** `loop` 默认 **false**：`--serve` 只提供面板。要自动保温必须显式 `--serve --auto`。 */
     port: 19388, open: false, loop: false,
+    /** `--log-file <path>`：守护循环的 console 输出**同时**追加到这个文件（带时间戳）。未给则不落盘。 */
+    logFile: undefined,
   }
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i]
@@ -1659,6 +1661,11 @@ function parseArgs(argv) {
     else if (a === '--no-loop') out.loop = false
     else if (a === '--auto') out.loop = true
     // --auto 才开守护；--no-loop 保留兼容（默认已经是关的）
+    else if (a === '--log-file') {
+      const p = argv[++i]
+      if (p === undefined || p === '') { console.error('--log-file 需要一个文件路径'); process.exit(1) }
+      out.logFile = p
+    }
     else if (a === '--port') {
       /** **非法端口必须报错**：早先 `--port abc` 会静默回落到 19388，用户以为换了端口其实没换。 */
       const raw = argv[++i]
@@ -1696,6 +1703,8 @@ const HELP = `dsh-cache-keepalive 独立 CLI（**不依赖 DSH 运行时、也�
   node cli/keepalive.mjs --serve --auto --yes-i-will-pay   面板 + 守护循环（会真花钱，启动会打警告框；缺付费确认直接 exit 3）
   node cli/keepalive.mjs --serve --no-loop      同上（兼容旧写法，等价于不带 --auto）
   node cli/keepalive.mjs --serve --port 19400   显式换端口（**只有它会换**；19388 被占也用它）
+  --log-file <path>                             把守护循环/命令的输出**同时**追加到该文件（带时间戳；目录会自动建）
+  node cli/keepalive.mjs --serve --auto --log-file .tmp/keepalive.log --yes-i-will-pay   面板+守护，日志落文件
   node cli/keepalive.mjs --loop [--interval 秒] 只跑守护循环（无 UI；**花钱，需 --yes-i-will-pay**）
   node cli/keepalive.mjs --status               一眼看全现状（候选、上次命中、累计花费）
   node cli/keepalive.mjs --list                 列出会话与保温状态
@@ -2054,6 +2063,31 @@ if (globalThis.__CK_PENDING_LIVE__ !== undefined) {
 }
 
 const args = parseArgs(process.argv.slice(2))
+
+/**
+ * `--log-file`：把 console 的每一次输出**同时**追加进文件（带 ISO 时间戳）。
+ *
+ * 只对「长期跑」的模式有意义（`--serve` / `--serve --auto` / `--loop`）：那几种下用户多半
+ * 没有终端可看（计划任务/pm2/双击 bat），出问题要能事后翻日志。
+ * 单次命令（`--list` / `--once`）也照写，反正都是同一套输出，不额外记别的东西。
+ */
+if (args.logFile !== undefined) {
+  /** 这几个 fs 函数在本文件里是「函数内动态解构」的局部名，顶层拿不到，这里自己取一份。 */
+  const fsx = await import('node:fs')
+  try {
+    fsx.mkdirSync(dirname(args.logFile), { recursive: true })
+  } catch { /* 目录建不出来就让下面的 append 自己失败 */ }
+  const rawOut = console.log.bind(console)
+  const rawErr = console.error.bind(console)
+  const tee = (raw) => (...xs) => {
+    try {
+      fsx.appendFileSync(args.logFile, "[" + new Date().toISOString() + "] " + xs.map((x) => String(x)).join(" ") + "\n")
+    } catch { /* 写不进去也不影响正常输出 */ }
+    raw(...xs)
+  }
+  console.log = tee(rawOut)
+  console.error = tee(rawErr)
+}
 
 let code = 0
 

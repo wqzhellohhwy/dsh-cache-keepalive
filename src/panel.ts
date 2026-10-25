@@ -2361,6 +2361,8 @@ function dropReason(dist) {
 }
 /** 时间轴当前数据 + 视图偏好（偏好持久化 —— 用户要求「记住是否逆序」）。 */
 var TL_DATA = null;
+/** 当前详情浮层打开的是哪条会话（空串 = 没开）。改价后要按它重拉。 */
+var TL_OPEN_ID = '';
 var TLS_KEY = 'cache-keepalive:timeline:v2';
 /**
  * 旧键。老版本面板（没有换新哨兵、且是整份写盘）若还活着，只能写这个键 ——
@@ -2570,6 +2572,7 @@ function openTimeline(el) {
 
 /** 面板自己弹时间轴（老路径）。 */
 function showTimelineLocal(id) {
+  TL_OPEN_ID = id;
   $('tlTitle').textContent = '加载中…';
   $('tlSub').textContent = '';
   $('tlSum').innerHTML = '';
@@ -2597,6 +2600,19 @@ function fetchTimeline(id) {
     $('tlTitle').textContent = '读取失败: ' + e;
     $('tlAxis').innerHTML = '';
   });
+}
+
+/**
+ * 详情浮层开着就用当前 id 与粒度**重拉一次**。
+ *
+ * 为什么需要：账本 entry.cost 是记账时的价快照，展示按**当前价**重算 ——
+ * 保存价格 / 门槛 / 模型价表之后不重拉，浮层里的金额要等 15 秒自动刷新才变，
+ * 用户会以为「改了价没生效」（这是 10-25 那条 6fabda6「改价后详情立即重拉」的落点）。
+ */
+function reloadTimelineIfOpen() {
+  if (TL_OPEN_ID === '' || TL_DATA === null) return;
+  if ($('tl').style.display !== 'block') return;
+  fetchTimeline(TL_OPEN_ID);
 }
 
 /** 按当前控件重排重绘（改筛选 / 改排序 / 点「最新在最上」都走这里）。 */
@@ -3412,6 +3428,9 @@ $('saveModels').onclick = function () {
   post('/settings', { pricesByModel: collectModels(), modelOverrides: collectModelOverrides() }).then(function (d) {
     if (d.ok) MODELS_DIRTY = false;
     toast(d.ok ? '模型价表已保存 —— 时间轴会按每一轮的实际模型分别计价' : (d.error || '失败'), !d.ok);
+    /** 改价后已打开的详情必须重算重拉（账本 cost 是快照，展示按当前价）。 */
+    /** typeof 守卫：测试沙箱按名字抽函数，没抽到的名字直接调会抛错。 */
+    if (d.ok && typeof reloadTimelineIfOpen === 'function') reloadTimelineIfOpen();
     refresh();
   }).catch(function (e) { toast('失败: ' + e, true); });
 };
@@ -3420,6 +3439,9 @@ $('saveLimits').onclick = function () {
   post('/settings', { modelOverrides: collectModelOverrides() }).then(function (d) {
     if (d.ok) LIMITS_DIRTY = false;
     toast(d.ok ? '按模型的时间门槛已保存 —— 门禁下一拍就用新值' : (d.error || '失败'), !d.ok);
+    /** 门槛也参与时间轴上的「间隔/闲置」标注，同样要重拉。 */
+    /** typeof 守卫：测试沙箱按名字抽函数，没抽到的名字直接调会抛错。 */
+    if (d.ok && typeof reloadTimelineIfOpen === 'function') reloadTimelineIfOpen();
     refresh();
   }).catch(function (e) { toast('失败: ' + e, true); });
 };
@@ -3599,6 +3621,9 @@ $('savePrices').onclick = function () {
     prices: { hit: Number($('priceHit').value), miss: Number($('priceMiss').value), out: Number($('priceOut').value) }
   }).then(function (d) {
     toast(d.ok ? '价格已保存 —— w/r、次数上限、盈亏平衡全都跟着变了' : (d.error || '失败'), !d.ok);
+    /** 改价后已打开的详情必须重算重拉（账本 cost 是快照，展示按当前价）。 */
+    /** typeof 守卫：测试沙箱按名字抽函数，没抽到的名字直接调会抛错。 */
+    if (d.ok && typeof reloadTimelineIfOpen === 'function') reloadTimelineIfOpen();
     refresh();
   });
 };
