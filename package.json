@@ -1,0 +1,51 @@
+{
+  "name": "@dsh-external/dsh-cache-keepalive",
+  "version": "0.0.1",
+  "description": "会话空闲时重放前缀，把 DeepSeek 前缀缓存续住，避免几小时后回来按 50 倍价重算",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "license": "BSD-3-Clause",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": ">=0.0.1-rc <2",
+    "@deepseek-ai/dsh-tools": ">=0.0.1-rc <2",
+    "cordis": ">=4.0.0-rc <5",
+    "schemastery": "^3.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "^5.9.0"
+  },
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check": "node scripts/check-imports.mjs && node --test && node scripts/smoke-apply.mjs && node scripts/smoke-panel-service.mjs && node scripts/check-guard.mjs && node scripts/check-billing-data.mjs && node scripts/check-cli-assemble.mjs",
+    "check:imports": "node scripts/check-imports.mjs",
+    "check:assemble": "node scripts/check-cli-assemble.mjs",
+    "check:smoke": "node scripts/smoke-apply.mjs && node scripts/smoke-panel-service.mjs",
+    "check:smoke:real": "node scripts/smoke-apply.mjs --real",
+    "check:parity": "node scripts/check-surface-parity.mjs",
+    "check:data": "node scripts/check-real-data.mjs",
+    "cli": "node cli/keepalive.mjs"
+  }
+}

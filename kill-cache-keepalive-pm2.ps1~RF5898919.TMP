@@ -1,0 +1,222 @@
+﻿<#
+.SYNOPSIS
+    杀掉所有缓存保温服务（keepalive app / 游离进程 / 面板端口 / pm2 daemon）。
+
+.DESCRIPTION
+    清理对象，按顺序：
+      1. pm2 里的 keepalive 应用（pm2 daemon 可达时用 `pm2 delete`，最干净）
+      2. keepalive 进程本身，两种形态都要覆盖：
+           a) 直接跑的：`node ... cli/keepalive.mjs --serve --open`（命令行可见）
+           b) pm2 托管的：`node ... pm2\lib\ProcessContainerFork.js --serve --open`
+              —— 命令行里【看不出】是哪个 app，所以用面板端口 19388–19407 反查
+      3. 所有 pm2 daemon（node ... pm2\lib\Daemon.js）—— 默认杀
+         因为 daemon 占着命名管道 \\.\pipe\rpc.sock；若它由**另一种权限身份**启动
+         （例如管理员），普通权限的 pm2 客户端就会 `connect EPERM`，且每次调用都会
+         再 spawn 一个新 daemon，越堆越多（实测堆到 16 个）。清 daemon 是唯一可靠的自愈手段。
+         ⚠ 同一 daemon 管理的其他 pm2 应用也会随之停止。只想留 daemon 时加 -KeepDaemon
+         （前提是 daemon 可达，否则拒绝执行，见下）。
+      4. 端口兜底复查
+
+    -DryRun 全程不调用 pm2：在 daemon 身份不匹配的状态下，连 `pm2 ping` 都会
+    新 spawn 一个 daemon，与"演练不动手"的承诺相悖。
+
+    杀 pm2 daemon 通常需要管理员：右键本文件 →「以管理员身份运行」。
+    普通权限运行也安全，只是杀不动的会明确报出来。
+
+.PARAMETER DryRun
+    只列出会杀什么，不实际动手（且不调用 pm2）。
+
+.PARAMETER KeepDaemon
+    保留 pm2 daemon（只删 keepalive 应用与进程）。daemon 不可达时拒绝执行：
+    那种状态下 pm2 托管的 keepalive 强杀后会被 daemon 按 autorestart 拉回，清不干净。
+
+.PARAMETER NoPause
+    结束时不等待回车（给脚本/自动化调用）。
+
+.OUTPUTS
+    退出码：0 = 清理干净；2 = 仍有残留；3 = 参数组合无法保证清理（已拒绝执行）。
+#>
+[CmdletBinding()]
+param(
+    [switch] $DryRun,
+    [switch] $KeepDaemon,
+    [switch] $NoPause
+)
+
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$ErrorActionPreference = 'Continue'
+
+$PANEL_PORTS = 19388..19407   # cli --serve 的默认起点，占用时自动 +1（最多 20 个）
+# 判定"是本服务"的命令行特征：直接跑的看 keepalive.mjs，pm2 托管的看 ProcessContainerFork
+$OURS = 'keepalive|ProcessContainerFork|pm2\\lib'
+
+$isAdmin = $false
+try {
+    $isAdmin = (New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+} catch { }
+
+function Say([string] $s) { Write-Host $s }
+
+function Stop-One($proc, [string] $why) {
+    if ($DryRun) { Say "  [dry-run] 将杀 pid=$($proc.ProcessId) $($proc.Name)  ($why)"; return }
+    try {
+        Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+        Say "  已杀 pid=$($proc.ProcessId) $($proc.Name)  ($why)"
+    }
+    catch {
+        Say "  杀失败 pid=$($proc.ProcessId) $($proc.Name)：$($_.Exception.Message)"
+    }
+}
+
+Say ''
+Say '缓存保温 · 全量清理'
+Say ("  身份  " + $(if ($isAdmin) { '管理员' } else { '普通权限（杀 pm2 daemon 需要管理员，建议右键「以管理员身份运行」）' }))
+Say ("  模式  " + $(if ($DryRun) { '演练（不动手，也不调 pm2）' } else { '执行' }) + $(if ($KeepDaemon) { ' · 保留 pm2 daemon' } else { '' }))
+Say ''
+
+# ── 1) pm2 应用 ─────────────────────────────────────────────────────────────
+Say '[1/4] pm2 中的 keepalive'
+$daemonReachable = $false
+$pm2 = Join-Path $env:APPDATA 'npm\pm2.cmd'
+if (-not (Test-Path -LiteralPath $pm2)) {
+    $c = Get-Command pm2 -ErrorAction SilentlyContinue
+    if ($c) { $pm2 = $c.Source }
+}
+
+if ($DryRun) {
+    Say '  [dry-run] 跳过所有 pm2 调用（EPERM 状态下 pm2 ping 也会新 spawn daemon）'
+}
+elseif ($pm2 -and (Test-Path -LiteralPath $pm2)) {
+    $ping = (& $pm2 ping 2>&1 | Out-String)
+    if ($ping -match 'pong') {
+        $daemonReachable = $true
+        $held = (& $pm2 pid keepalive 2>&1 | Out-String).Trim()
+        if ($held) {
+            & $pm2 delete keepalive *> $null
+            Say "  已执行 pm2 delete keepalive（pid $held）"
+        }
+        else { Say '  pm2 里没有 keepalive' }
+    }
+    else {
+        Say '  pm2 守护进程不可达（典型表现：connect EPERM \\.\pipe\rpc.sock —— 权限身份不匹配）'
+        Say '  → 跳过 pm2，改由下面直接清进程'
+    }
+}
+else { Say '  找不到 pm2 → 跳过' }
+
+# ── 1.5) 安全闸：-KeepDaemon 与「daemon 不可达」不能同时成立 ────────────────
+if ($KeepDaemon -and -not $daemonReachable -and -not $DryRun) {
+    Say ''
+    Say '[拒绝] -KeepDaemon 与「daemon 不可达」同时成立时无法保证清理：' -ForegroundColor Red
+    Say '       pm2 托管的 keepalive 会被强杀，但存活的 daemon 会按 autorestart 把它拉回来（最多 10 次），'
+    Say '       结果是你以为清了、其实又活了。'
+    Say '       请去掉 -KeepDaemon 重跑（默认会把 daemon 一起清掉）。'
+    if (-not $NoPause) { $null = Read-Host '按回车关闭窗口' }
+    exit 3
+}
+
+# ── 2) keepalive 进程（两种形态 + 端口反查）────────────────────────────────
+Say ''
+Say '[2/4] keepalive 进程'
+$found = New-Object System.Collections.ArrayList
+
+# a) 直接跑的，命令行里就有 keepalive.mjs
+foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+                 Where-Object { $_.CommandLine -match 'keepalive\.mjs' })) {
+    [void]$found.Add($p)
+}
+
+# b) pm2 托管的：命令行是 ProcessContainerFork.js，看不出 app 名 → 用面板端口反查
+foreach ($port in $PANEL_PORTS) {
+    foreach ($conn in @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)) {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($conn.OwningProcess)" -ErrorAction SilentlyContinue
+        if (-not $proc) { continue }
+        if ($proc.Name -ne 'node.exe') {
+            Say "  端口 $port 被 pid=$($conn.OwningProcess) $($proc.Name) 占用（非本服务，跳过）"
+            continue
+        }
+        if ($proc.CommandLine -match $OURS) {
+            Say "  端口 $port → pid $($proc.ProcessId)（pm2 托管的 keepalive）"
+            [void]$found.Add($proc)
+        }
+        else {
+            Say "  端口 $port 被另一个 node 进程占用（命令行不含 pm2/keepalive，跳过）"
+        }
+    }
+}
+
+$found = @($found | Sort-Object ProcessId -Unique)
+if ($found.Count -eq 0) { Say '  无' } else { $found | ForEach-Object { Stop-One $_ 'keepalive' } }
+
+# ── 3) pm2 daemon ───────────────────────────────────────────────────────────
+Say ''
+Say '[3/4] pm2 daemon（node ... pm2\lib\Daemon.js）'
+$dm = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match 'pm2\\lib\\Daemon' })
+if ($KeepDaemon) {
+    Say ("  保留（-KeepDaemon）；当前 $($dm.Count) 个")
+}
+elseif ($dm.Count -eq 0) { Say '  无' }
+else {
+    Say "  发现 $($dm.Count) 个 —— 注意：同一 daemon 管理的其他 pm2 应用也会被停止"
+    $dm | ForEach-Object { Stop-One $_ 'pm2 daemon' }
+}
+
+# ── 4) 端口兜底复查 ─────────────────────────────────────────────────────────
+Say ''
+Say '[4/4] 面板端口兜底复查'
+$killedPort = 0
+foreach ($port in $PANEL_PORTS) {
+    foreach ($conn in @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)) {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($conn.OwningProcess)" -ErrorAction SilentlyContinue
+        if ($proc -and $proc.CommandLine -match $OURS) {
+            Stop-One $proc "端口 $port 仍被本服务占用"
+            $killedPort++
+        }
+    }
+}
+if ($killedPort -eq 0) { Say '  无本服务占用' }
+
+# ── 复查（只统计属于本服务的残留）──────────────────────────────────────────
+Start-Sleep -Seconds 1
+Say ''
+Say '=== 复查 ==='
+$leftD = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+           Where-Object { $_.CommandLine -match 'pm2\\lib\\Daemon' }).Count
+# 两种形态都要算：直接跑的 keepalive.mjs + pm2 托管的 ProcessContainerFork
+$leftK = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+           Where-Object { $_.CommandLine -match 'keepalive\.mjs|ProcessContainerFork' }).Count
+# 只统计"属于本服务"的监听，避免无关程序占这些端口时误报残留
+$leftP = @(foreach ($p in $PANEL_PORTS) {
+    foreach ($conn in @(Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)) {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($conn.OwningProcess)" -ErrorAction SilentlyContinue
+        if ($proc -and $proc.CommandLine -match $OURS) { $conn }
+    }
+}).Count
+Say "  pm2 daemon 残留     $leftD"
+Say "  keepalive 进程残留  $leftK"
+Say "  面板端口监听残留    $leftP"
+$pipes = @(Get-ChildItem '\\.\pipe\' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'pm2|rpc\.sock' } | Select-Object -ExpandProperty Name)
+Say ("  命名管道            " + $(if ($pipes.Count) { $pipes -join ', ' } else { '（无）' }))
+
+$remain = $leftD + $leftK + $leftP
+if ($DryRun) {
+    Say ''
+    Say '（演练模式：上面全部是"将杀"清单，未实际执行任何清理）' -ForegroundColor DarkGray
+}
+elseif ($remain -eq 0) {
+    Say ''
+    Say '全部清理完成。重新启动：双击 start-cache-keepalive-pm2.bat' -ForegroundColor Green
+}
+elseif (-not $isAdmin) {
+    Say ''
+    Say '仍有残留 —— 多半是管理员身份启动的进程，请右键本文件「以管理员身份运行」再清一次。' -ForegroundColor Yellow
+}
+else {
+    Say ''
+    Say '仍有残留（可能刚被重启）：再跑一次即可。' -ForegroundColor Yellow
+}
+
+if (-not $NoPause) { $null = Read-Host '按回车关闭窗口' }
+if ($remain -ne 0) { exit 2 }
+exit 0

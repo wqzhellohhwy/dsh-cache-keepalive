@@ -1,0 +1,174 @@
+﻿<#
+.SYNOPSIS
+    用 pm2 拉起 / 管理缓存保温（dsh-cache-keepalive），并在窗口里给出可见反馈。
+
+.DESCRIPTION
+    原启动方式打不开，有两个独立原因，本脚本都修掉了：
+
+    ① 原 start-cache-keepalive-pm2.bat 只有一行 `pm2 start ecosystem.config.js`，
+       用的是相对路径且不切工作目录 —— 只要调用时的当前目录不是插件目录，
+       必然 `[PM2][ERROR] File ecosystem.config.js not found`；双击闪退时看不到这行错。
+    ② 配置文件的名字本身就有问题：package.json 里是 `"type": "module"`，
+       于是 `.js` 一律按 ES module 解析，而该文件用的是 CommonJS
+       （require / module.exports / __dirname）→ pm2 报
+       `File ... malformated  ReferenceError: require is not defined in ES module scope`。
+       正解是按 Node 的提示改名为 `ecosystem.config.cjs`（本仓库已改）。
+       本脚本同时兼容两个名字，优先 .cjs。
+
+    另外原方式成功时也零输出（pm2 是后台守护），看起来就像"打不开"。
+    本脚本固定切到插件目录 → 解析 pm2 绝对路径 → 幂等启动（在跑就重启）→
+    校验注册成功 → 回显 pm2 状态、PID、面板地址、日志路径。
+
+    ③ 注册校验（`pm2 pid keepalive`，实测 3.7 秒）原先在 .bat 的 :postcheck 里，
+    而那段跑在"按回车关闭窗口"之后 —— 于是每次回车后窗口都要再卡约 3.7 秒
+    才关。校验收进本脚本、并放在 Hold-Open 之前，回车后 cmd 立即退出。
+
+.PARAMETER Action
+    up       确保在跑：没在 pm2 里就 start，已存在就 restart（刷新代码/配置）。默认。
+    restart  强制重启（不存在则启动）
+    stop     停止并从 pm2 列表中移除
+    status   只看状态，不动进程
+    logs     实时跟踪日志（Ctrl+C 退出）
+    open     只打开面板
+
+.PARAMETER Open
+    额外用默认浏览器打开面板。通常不需要：配置文件里的 args 已带 --open，
+    keepalive 启动时自己会开；重复打开会多出一个标签页。
+
+.PARAMETER NoPause
+    结束时不等待回车（给脚本/自动化调用）。
+#>
+[CmdletBinding()]
+param(
+    [ValidateSet('up', 'restart', 'stop', 'status', 'logs', 'open')]
+    [string] $Action = 'up',
+    [switch] $Open,
+    [switch] $NoPause
+)
+
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$ErrorActionPreference = 'Stop'
+
+$here = $PSScriptRoot
+if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Path }
+
+# 优先 .cjs（"type": "module" 的包里，CommonJS 配置必须是 .cjs），兼容旧名 .js
+$eco = @('ecosystem.config.cjs', 'ecosystem.config.js') |
+    ForEach-Object { Join-Path $here $_ } |
+    Where-Object { Test-Path -LiteralPath $_ } |
+    Select-Object -First 1
+$ecoName = if ($eco) { [IO.Path]::GetFileName($eco) } else { 'ecosystem.config.cjs' }
+
+function Fail([string] $msg) {
+    Write-Host ''
+    Write-Host "[失败] $msg" -ForegroundColor Red
+    if (-not $NoPause) { $null = Read-Host '按回车关闭窗口' }
+    exit 1
+}
+
+function Hold-Open {
+    if (-not $NoPause) { $null = Read-Host '按回车关闭窗口' }
+}
+
+# ── ① 修工作目录：pm2 的相对路径、keepalive 读相对资源都依赖它 ────────────────
+try { Set-Location -LiteralPath $here } catch { Fail "无法切到插件目录：$here" }
+if (-not $eco) { Fail "找不到 pm2 配置文件（ecosystem.config.cjs 或 .js）：$here" }
+
+# ── ② 解析依赖（不硬编码任何用户路径） ───────────────────────────────────────
+$pm2 = Join-Path $env:APPDATA 'npm\pm2.cmd'
+if (-not (Test-Path -LiteralPath $pm2)) {
+    $c = Get-Command pm2 -ErrorAction SilentlyContinue
+    if ($c) { $pm2 = $c.Source } else { Fail '找不到 pm2。先装：npm i -g pm2' }
+}
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail 'PATH 里没有 node（pm2 需要它来跑 keepalive.mjs）' }
+
+Write-Host ''
+Write-Host '缓存保温 · pm2 启动器' -ForegroundColor Cyan
+Write-Host "  插件目录  $here"
+Write-Host "  配置      $ecoName"
+Write-Host "  pm2       $pm2"
+Write-Host "  动作      $Action"
+Write-Host ''
+
+$exists = $false
+& $pm2 describe keepalive *> $null
+if ($LASTEXITCODE -eq 0) { $exists = $true }
+
+switch ($Action) {
+    'up' {
+        if ($exists) {
+            Write-Host '已在 pm2 中 → 重启（刷新代码/配置）' -ForegroundColor Yellow
+            & $pm2 restart keepalive
+        }
+        else {
+            Write-Host "首次启动 → pm2 start $ecoName" -ForegroundColor Yellow
+            & $pm2 start $eco
+        }
+    }
+    'restart' {
+        if ($exists) { & $pm2 restart keepalive } else { & $pm2 start $eco }
+    }
+    'stop' {
+        if ($exists) { & $pm2 delete keepalive } else { Write-Host '（本来就不在 pm2 里）' }
+    }
+    'status' { }
+    'logs' {
+        Write-Host '日志跟踪中 —— Ctrl+C 退出' -ForegroundColor DarkGray
+        & $pm2 logs keepalive --lines 40
+        exit 0
+    }
+    'open' { }
+}
+
+# ── ③ 状态回显（这就是"打开"的可见证据） ────────────────────────────────────
+if ($Action -in @('up', 'restart', 'status')) {
+    Write-Host ''
+    & $pm2 list
+}
+
+# ── ④ 注册校验：必须赶在"按回车"之前跑完 ────────────────────────────────────
+# 原先在 .bat 的 :postcheck 里、位于 pause 之后：回车后还要等 pm2 pid
+# （实测 3.7 秒）窗口才肯关，用户感觉"卡一下"。搬到这里即可根除。
+# 刻意排在 pm2 list 之后：启动真失败时先看到状态表（errored/stopped）更好定位。
+if ($Action -in @('up', 'restart')) {
+    $kp = ('' + (& $pm2 pid keepalive 2>$null | Select-Object -First 1)).Trim()
+    if ($kp -eq '' -or $kp -eq '0') {
+        Fail "keepalive 没有注册进 pm2 —— 启动并没有真正成功。看日志：$env:USERPROFILE\.pm2\logs\keepalive-error.log"
+    }
+    Write-Host "校验  pm2 已注册，pid $kp" -ForegroundColor DarkGray
+}
+
+# ── stop 到此为止：进程已移除，不必再报面板地址 ─────────────────────────────
+if ($Action -eq 'stop') {
+    Write-Host ''
+    Write-Host '已停止，并从 pm2 列表中移除。' -ForegroundColor Yellow
+    Write-Host '重新启动：start-cache-keepalive-pm2.bat'
+    Hold-Open
+    exit 0
+}
+
+# ── ⑤ 面板地址：从 keepalive 自己的启动横幅里取最后一条 ──────────────────────
+$panel = $null
+$outLog = Join-Path $env:USERPROFILE '.pm2\logs\keepalive-out.log'
+if (Test-Path -LiteralPath $outLog) {
+    $hits = @(Select-String -LiteralPath $outLog -Pattern 'http://127\.0\.0\.1:\d+/api/cache-keepalive/panel' -ErrorAction SilentlyContinue)
+    if ($hits.Count -gt 0) { $panel = $hits[-1].Matches[-1].Value }
+}
+if (-not $panel) { $panel = 'http://127.0.0.1:19388/api/cache-keepalive/panel' }   # --serve 的默认起点
+
+Write-Host ''
+Write-Host "面板  $panel" -ForegroundColor Green
+Write-Host "日志  $outLog"
+Write-Host '      （.err 同名）'
+Write-Host '停止  start-cache-keepalive-pm2.bat stop'
+Write-Host '开机自启  pm2 save  然后   pm2 startup（按提示再执行一行）'
+Write-Host ''
+
+if ($Open -or $Action -eq 'open') {
+    Write-Host '正在用默认浏览器打开面板…'
+    Start-Process $panel
+    Start-Sleep -Seconds 1
+}
+
+Hold-Open
+exit 0

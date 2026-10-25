@@ -1,0 +1,173 @@
+@echo off
+rem ==========================================================================
+rem  start-cache-keepalive-pm2.bat - launch dsh-cache-keepalive under pm2
+rem
+rem  Fixes over the original one-liner (`pm2 start ecosystem.config.js`):
+rem
+rem   1) it never cd'd to its own directory -> any other caller's cwd produced
+rem      "[PM2][ERROR] File ecosystem.config.js not found" (and the window closed
+rem      instantly, hiding the reason);
+rem   2) the config file name was wrong: package.json declares "type": "module",
+rem      so a .js file is parsed as an ES module while that file is CommonJS
+rem      (require / module.exports / __dirname) -> pm2 reported "malformated /
+rem      require is not defined in ES module scope". Renamed to .cjs.
+rem
+rem  Fix (window would not close on the first Enter):
+rem   3) the pwsh call sat inside a parenthesised block; cmd expands
+rem      %ERRORLEVEL% when it PARSES the whole block, so RC got the error level
+rem      from BEFORE pwsh ran -> "pause" fired even on success. Flow now uses GOTO.
+rem
+rem  Fix (double-click vs typed-in-a-console):
+rem   4) when the user TYPES the path inside an existing console, the script is
+rem      expected to return to the prompt - the window is the user's own session
+rem      and must NOT be closed. Previously the ps1 always asked
+rem      "?????", which was misleading there. We now detect how we were
+rem      started via %cmdcmdline% (double-click -> it contains this file name)
+rem      and pass -NoPause only for the typed case. Double-click keeps the
+rem      prompt, because there Enter really does close that window.
+rem
+rem  Fixes found by adversarial review:
+rem   5) pre-flight: ask pm2 for a pong BEFORE starting anything. When the pm2
+rem      daemon runs under another integrity level (e.g. admin), the pipe
+rem      \\.\pipe\rpc.sock is isolated: every pm2 call fails with "connect EPERM"
+rem      and each attempt spawns ANOTHER daemon, and the start path would
+rem      register a SECOND keepalive instance on the next free port.
+rem   6) post-check: the ps1 does not verify `pm2 start/restart` exit codes, so a
+rem      failed start used to be reported as success. We now ask pm2 for the
+rem      app's pid and fail loudly if it is absent.
+rem   7) that post-check used to live HERE, i.e. AFTER the "press Enter" prompt,
+rem      so every Enter cost another ~3.7 s (`for /f ... pm2 pid`) before the
+rem      window finally closed - the visible "hang" on Enter. It now runs
+rem      inside the ps1, BEFORE that prompt. Nothing follows the ps1 call
+rem      below: press Enter, window closes immediately.
+rem
+rem  Usage:  start-cache-keepalive-pm2.bat [up|restart|stop|status|logs|open]
+rem  ASCII-only on purpose: it must render correctly in any console code page.
+rem ==========================================================================
+setlocal EnableExtensions
+cd /d "%~dp0"
+
+set "PS1=%~dp0start-cache-keepalive-pm2.ps1"
+
+rem --- resolve pm2 first: needed for the pre-flight and the post-check --------
+set "PM2=%APPDATA%\npm\pm2.cmd"
+if not exist "%PM2%" for %%i in (pm2.cmd) do set "PM2=%%~$PATH:i"
+
+rem --- locate a PowerShell host (7 first, then 5.1; the ps1 is UTF-8 BOM) ----
+set "PWSH="
+if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "PWSH=%ProgramFiles%\PowerShell\7\pwsh.exe"
+if not defined PWSH for %%i in (pwsh.exe) do if not defined PWSH set "PWSH=%%~$PATH:i"
+if not defined PWSH if exist "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" set "PWSH=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+rem --- started by double-click? then cmd was invoked as `cmd.exe /c "..."` ---
+rem     A console the user already had open reports a bare `cmd.exe`, no /c.
+rem     Do NOT test for this file's own name: that works on a minimal replica but
+rem     was observed to fail silently inside this script (and echoing a
+rem     cmdcmdline that contains < > & re-enters redirection parsing).
+rem     "/c" is short, quote-free and unambiguous here.
+set "DOUBLECLICK="
+echo %cmdcmdline% | findstr /c:"/c" >nul 2>nul
+if not errorlevel 1 set "DOUBLECLICK=1"
+
+rem --- args: add -NoPause when typed in an existing console (window stays open
+rem     on purpose there, so waiting for Enter is just noise) -----------------
+set "ARGS=%*"
+if not defined DOUBLECLICK (
+    echo %ARGS% | find /i "-NoPause" >nul 2>nul
+    if errorlevel 1 set "ARGS=%ARGS% -NoPause"
+)
+
+if not exist "%PS1%" goto :fallback
+if not defined PWSH goto :fallback
+
+set "ACT=%~1"
+if "%ACT%"=="" set "ACT=up"
+
+if exist "%PM2%" goto :preflight
+rem ?? pm2 ????? ps1 ????????????
+goto :run
+
+:preflight
+call "%PM2%" ping >nul 2>nul
+if not errorlevel 1 goto :run
+rem pm2 ??????????????ps1 ??????????????????
+if /i "%ACT%"=="status" goto :run
+if /i "%ACT%"=="stop" goto :run
+if /i "%ACT%"=="open" goto :run
+goto :fail_daemon
+
+:run
+"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %ARGS%
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" (
+    echo.
+    echo [FAIL] PowerShell host returned exit code %RC%
+    rem NO pause here: every failure path inside the ps1 already waited for
+    rem Enter. Pausing again made a single failure need two key presses.
+    exit /b %RC%
+)
+
+rem --- Success path: NOTHING may follow the ps1 call here. -------------------
+rem     Registration check AND the "press Enter to close" prompt both happen
+rem     INSIDE the ps1, before that prompt, so Enter must now close the window
+rem     instantly. (Do not reintroduce a pm2 call after this point: the old
+rem     :postcheck spent 3.7 s here and made Enter feel like a hang.)
+exit /b 0
+
+:fail_daemon
+echo.
+echo [FAIL] pm2 daemon is unreachable: connect EPERM \\.\pipe\rpc.sock
+echo        Usual cause: the daemon was started under another integrity level
+echo        (e.g. an elevated shell), and the named pipe is isolated per level.
+echo        Every pm2 call in that state spawns yet another daemon.
+echo.
+echo        Fix: run kill-cache-keepalive-pm2.ps1 (right-click -^> Run as administrator),
+echo        then run this file again.
+pause
+exit /b 1
+
+rem ---------------------------------------------------------------------------
+rem  fallback: no ps1 or no PowerShell -> drive pm2 directly
+rem ---------------------------------------------------------------------------
+:fallback
+echo [warn] start-cache-keepalive-pm2.ps1 or PowerShell not found; using plain pm2.
+if not exist "%PM2%" goto :fail_pm2
+
+set "ECO=%~dp0ecosystem.config.cjs"
+if not exist "%ECO%" set "ECO=%~dp0ecosystem.config.js"
+if not exist "%ECO%" goto :fail_eco
+
+call "%PM2%" describe keepalive >nul 2>nul
+if errorlevel 1 goto :do_start
+echo [1/2] restarting: pm2 restart keepalive
+call "%PM2%" restart keepalive
+goto :after_cmd
+
+:do_start
+echo [1/2] starting: pm2 start %ECO%
+call "%PM2%" start "%ECO%"
+
+:after_cmd
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" (
+    echo [FAIL] pm2 command failed with exit code %RC%
+    pause
+    exit /b %RC%
+)
+echo [2/2] status
+call "%PM2%" list
+echo.
+echo Panel : http://127.0.0.1:19388/api/cache-keepalive/panel
+echo Logs  : %USERPROFILE%\.pm2\logs\keepalive-out.log
+echo Stop  : start-cache-keepalive-pm2.bat stop
+exit /b 0
+
+:fail_pm2
+echo [FAIL] pm2 not found. Install it with:  npm i -g pm2
+pause
+exit /b 1
+
+:fail_eco
+echo [FAIL] ecosystem.config.cjs not found in %~dp0
+pause
+exit /b 1

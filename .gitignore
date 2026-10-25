@@ -1,0 +1,7 @@
+node_modules/
+lib/
+*.tsbuildinfo
+*.tgz
+.tmp/
+# 插件运行时写的会话元数据缓存（.tmp 之外若有人拷过来，别提交）
+sessions.meta.json

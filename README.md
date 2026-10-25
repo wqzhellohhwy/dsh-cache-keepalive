@@ -1,0 +1,447 @@
+# dsh-cache-keepalive — 会话缓存保温
+
+会话空闲时把它**完整的前缀**（system + tools + messages）重放一次，再补一条极短消息，
+让 DeepSeek 的前缀缓存一直"被读到"而不被回收。
+
+**为什么值得做**：DeepSeek 的价目里，缓存命中输入 0.02 元/百万，未命中 1.0 元/百万 —— **差 50 倍**。
+一条 20 万 tokens 的会话冷掉后，下一句话要按未命中价重算整个上下文 = **0.20 元**；
+而保温一次只要 **0.004 元**。
+
+| | 成本 |
+|---|---|
+| 让缓存冷掉，回来后第一句话 | **0.20 元**（H = 200K） |
+| 保温一次 | **0.004 元** |
+| 每 4 小时保温一次，保一天（6 次） | 0.024 元 |
+| 实测杠杆 | **约 43 倍** |
+
+## 安装
+
+插件以 `link:` 方式装进 profile 的 `dependencies` 与 `dsh.profile.bundles`（包名 `@dsh-external/dsh-cache-keepalive`）。
+**带 client 半边的插件不要用注入器装**（会 `duplicate factory registration`，见下文「安装」一节）。
+本机 Node v24 原生支持 TypeScript 类型剥离，因此 `package.json` 的 `main` 直接指向 `src/index.ts`，
+**不需要 tsc/tsdown 构建链**（本机没有 DSH 源码 checkout，只有运行时包）。
+
+依赖通过 junction 指向运行时包（插件半边需要；**独立 CLI 不需要**）：
+
+```
+node_modules/@deepseek-ai/{cordis,dsh-tools,dsh-llm,dsh-session}
+  → <DSH 运行时目录>/node_modules/@deepseek-ai/<包>
+```
+
+## 脱离 DSH：独立 CLI
+
+`cli/keepalive.mjs` **零 DSH 依赖** —— 不 import 任何 `@deepseek-ai/*` 包，也不要求 DSH 进程在跑。
+它直接读磁盘上的会话日志，离线重建出与真实请求同源的前缀，再直连提供方 API 保温。
+
+```bash
+node cli/keepalive.mjs --list                  # 列会话
+node cli/keepalive.mjs --status                # 一眼看全现状（候选/命中/累计花费）
+node cli/keepalive.mjs --dry-run <id>          # 只装配不发请求（自检，不花钱）
+node cli/keepalive.mjs --once <id>             # 真实保温一次
+node cli/keepalive.mjs --loop                  # 守护循环（DSH 关着也在保）
+```
+
+环境变量：`DSH_HOME`（会话日志所在，默认 `~/.dsh`）、`DEEPSEEK_API_KEY`（缺省读
+`$DSH_HOME/.credentials.yaml` 的 refs 段）、`DEEPSEEK_BASE_URL`。
+
+**为什么能脱离还保持字节级同源**：装配链的三段全部离线复刻，零依赖 ——
+
+| 段 | 实现 | 验证 |
+|---|---|---|
+| 多帧 zstd 解码 | `src/core/sessions.ts` | Node 内置只解第一帧，这里按帧魔数切段 |
+| surface 折叠 / 请求头 / 消息投影 | `src/core/surface.ts` | `npm run check:parity` 与官方实现**逐节点比对**（本机 319 会话全一致） |
+| 工具声明 | `src/core/toolhistory.ts` | 复刻 DSH 内部未导出的 `ToolHistoryProjection` |
+| 序列化 | `src/core/wire.ts` | 内部块 → API 变体（`reasoning`→`thinking`、`tool-call`→`tool_use`） |
+
+**实测命中**（对着 DSH 真实请求建立的缓存）：
+
+```
+无图片会话   命中 99.9%（238208 / 238452 tok，0.005 元，杠杆 47.6 倍）
+含图片会话   命中 97.1%（图片在 15% 处；被降级的图片段就是差的 2.9%）
+```
+
+**已知硬边界**：图片字节存在 DSH 的附件库里，离线不读 → 图片块被降级成占位文本。
+图片位置 < 30% 的会话**默认拒绝保温**（会污染缓存），可用 `--force` 覆盖；
+>30% 的照常保，前面的大段前缀仍能命中。
+
+## 图形面板
+
+浏览器打开（CLI 面板固定 **19388**；插件里的面板用你那个 DSH 实例的端口）：
+
+```
+http://127.0.0.1:19388/api/cache-keepalive/panel
+```
+
+面板分**两个页面**（顶部 tab 切换，当前页会记住）。**面板里只有这两页，没有「试验模式」页**
+（原「🧪 试验模式」整页已于 2026-10-20 删除，替代入口见本节末尾）：
+
+1. **保温**（默认页）
+   - **自动候选** —— `保 N 条` + `闲置上限`（`idleLimitHours`，与门禁**共用同一个数**）。
+     按最后活动从近到远排序取前 N 条；**先过门禁**：门禁不认的会话不占名额
+     （「已在保温节奏上」的 `too-soon`/`fresh` 仍占名额，否则名额会随节奏滚动、保费翻倍）。
+     **不占自动名额**的三类：手动设成「强制开 / 关闭」的会话（归手动管，「强制开」照旧保温、只是不占配额）、
+     无标题的新对话（还没用起来）、已归档的会话。改完策略**即时重算**候选，不用等下一个 tick。
+   - **默认参数** —— 间隔 / **刚保过提示**（`freshSeconds`，`0` = 关掉这个状态）/ 熔断冷却 /
+     最多连续保几次 / 单会话预算 / 保温问题 / 输出上限。
+     ⚠️ **熔断线（`circuitHitRate`，0.05~0.9）面板目前还没有输入框**，只能用
+     `cache_lab` action=`set-settings` 改（或直接编辑 `state.json` 的 `settings`）。
+     列表上方还有搜索框（按标题/id 过滤）+ 一排筛选按钮（隐藏已归档 / 隐藏子代理 /
+     隐藏空会话 / 只看本进程 / 逆序），全部**颜色反馈、无勾选态**，刷新不丢。
+   - **会话列表** —— 每个会话一行：状态、当前策略（下拉可改）、是否自动候选、闲置多久、
+     上次命中率与花费、累计花费、门禁结论（**为什么没保**）、以及「立刻保温」按钮。每行还能填备注。
+   - 每张卡的**保存按钮紧贴字段行右侧**，旁边是**「恢复默认」**（填回推荐值并保存）。
+2. **⚙️ 设置** —— 单价（元/百万 token）+ 两个工具开关（`cache_keepalive` / `cache_lab` 是否开放给 Agent）。
+   切换工具开关会改变工具面，所有会话的前缀缓存会失效一次，所以别频繁切。
+
+> **试验模式在面板上已删除**（原「🧪 试验模式」整页连同范围/预算/白名单/护栏回显一起移除）。
+> 后端能力**全部保留**，改用工具或 CLI 做实验：
+> - Agent：`cache_lab` action=`lab`（开/关试验模式）、action=`experiment`（零花费不变量自检）
+> - 命令行：`node cli/keepalive.mjs --lab run|list|doctor|verify|live`
+> - 试验模式仍是**持续真实调用 API 产生花费**，验完记得关。
+> 分工一句话：**`cache_keepalive` 管「保不保、现在保一下、清账」；`cache_lab` 管「读/改设置、看明细、实验、零花费自检」。**
+> `dry-run` / `--lab live --yes` / `--lab run --json` 这些**只有 CLI 有**（工具侧不提供）。
+
+接口（同源 JSON，面板自己用）：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET | `/api/cache-keepalive/panel` | 面板 HTML |
+| GET | `/api/cache-keepalive/state` | 完整状态快照 |
+| POST | `/api/cache-keepalive/policy` | 改某会话策略 `{id, mode, note, ...}` |
+| POST | `/api/cache-keepalive/settings` | 改全局设置（含 `prices`、`exposeLabTools`） |
+| POST | `/api/cache-keepalive/ping` | 立刻保温某会话 `{id}` |
+| POST | `/api/cache-keepalive/reset` | 解除某会话熔断 `{id}` |
+| GET/POST | `/api/cache-keepalive/timeline` | 某会话的每轮真实计费时间轴 `?id=` 或 `{id}` |
+
+> 为什么面板是 host 路由而不是 client 插件：面板本身是**自包含 HTML（零构建）**，由 host 注册同源路由提供；
+> client 半侧只负责在 DSH 界面里放一个 iframe 指向它。这样面板逻辑与渲染端模块图解耦。
+
+## 启动方式（三种模式，互斥）
+
+| 命令 | 起什么 | 会花钱吗 |
+|---|---|---|
+| `node cli/keepalive.mjs --serve` | **只起面板**（无守护） | **不会**（默认不开守护，一个请求都不发） |
+| `node cli/keepalive.mjs --serve --auto` | 面板 + 守护循环同进程 | **会**（真保温、按真实请求计费，启动会打警告框） |
+| `node cli/keepalive.mjs --loop` | 只跑守护循环，无面板（默认每 60 秒一拍） | **会** |
+
+- **端口固定 19388**，被占用即**报错退出**（不自动换端口、不自动 +1）。
+  确实要换：`node cli/keepalive.mjs --serve --port 19400`（**只有 `--port` 会换**）。
+  这条是为了让「面板地址」永远可预测 —— 旧行为（占用了就悄悄 +1）会让面板地址漂移，排查时对不上。
+- **`--serve` 默认不保温**：只起面板便于先看清账本与门禁结论；确认无误后再加 `--auto`。
+- `--loop` 固定**晚插件 90 秒**起拍（读 `runtime.json` 锚点），避免两边同一时刻保同一条会话。
+
+## 普通启动（前台，不用 pm2）
+
+```powershell
+.\start-cache-keepalive.bat                # 等价于 node cli\keepalive.mjs --serve --auto --open（bat 内已 set CK_YES_I_WILL_PAY=1）
+```
+
+> 该 .bat 是固定一行、**不接收参数**；要传参（如 `--port 19400`）直接跑
+> `node cli\keepalive.mjs --serve --open --port 19400`。
+> ⚠️ 这个 `.bat` 就是「面板 + 自动保温」：`--serve --auto` 会真发请求，**必须带付费确认** —— bat 开头已 `set "CK_YES_I_WILL_PAY=1"`，手敲等价命令时别忘了带，否则 exit 3 直接拒绝。
+> 单实例：19388 已有人在监听时，bat 只打印一行 `Already running` 并 exit 0，不再起第二个守护（两个守护会在几秒内把同一会话保两次，第二次必然低命中并触发熔断）。
+
+- 前台运行：**Ctrl+C 结束**（或直接关掉窗口）。窗口关了就停 —— 没有守护、不会自动重启。
+- 清理它：`.\kill-cache-keepalive.ps1`（只认命令行里带 `cli/keepalive.mjs` 的那份，**完全不碰 pm2**）。
+
+## 常驻（pm2）
+
+```powershell
+.\start-cache-keepalive-pm.bat            # 启动/重启（双击等价；已在 pm2 里就 restart）
+.\start-cache-keepalive-pm.bat status     # 只看状态
+.\start-cache-keepalive-pm.bat stop       # 停掉并从 pm2 列表移除
+.\start-cache-keepalive-pm.bat logs       # 实时跟踪日志
+.\start-cache-keepalive-pm.bat open       # 只打开面板
+
+# 开机自启（可选）
+pm2 save
+pm2 startup                            # 按回显执行其中一行
+```
+
+- 配置文件名必须是 **`ecosystem.config.cjs`**：`package.json` 是 `"type": "module"`，
+  用 `.js` 会让 Node 按 ES module 解析该文件（内含 `require` / `__dirname`）→ `pm2 start` 必失败
+  （`File ... malformated`）。
+- 等价的手工命令：在插件目录下 `pm2 start ecosystem.config.cjs`。
+- 面板 `http://127.0.0.1:19388/api/cache-keepalive/panel`（**端口固定，占用即报错退出**；要换用 `--port`）。
+- 日志 `%USERPROFILE%\.pm2\logs\keepalive-out.log`（错误同名 `.err`）。
+- 清理它：`.\kill-cache-keepalive-pm.ps1`（`pm2 delete` + 清 daemon + 端口兜底；**不动普通启动那份**）。
+
+> **两套不能同时占 19388**：端口固定后，后启动的那份会**报错退出**而不是自动错开。
+> 要并存必须显式给其中一个换端口（如 `--port 19400`）。
+> 识别方式：命令行带 `cli/keepalive.mjs` = 普通启动；带 `pm2\lib\ProcessContainerFork.js` = pm2 托管。
+
+## 两个半边（host + client）
+
+本插件同时有 host 半边和 client 半边，**各自解决不同问题**：
+
+| 半边 | 源 | 产物 | 作用 |
+|---|---|---|---|
+| host | `src/index.ts` | 无（源码直跑） | 面板路由、保温引擎、工具注册 |
+| client | `src/client/index.tsx` | `lib/client.js` | DSH 界面里「对话｜轨迹｜记忆」那一行的**「缓存保温」页签**（iframe 内嵌 host 面板） |
+
+**host 走 URL，client 走界面**：想在 DSH 自己的界面里出现东西，只有 `ctx.slots` 这一条路，
+host 路由做不到。当前 client 只注册**一个页签席位**：
+
+```ts
+ctx.slots.inject('conversation.view', () => ctx.slots.register(
+  { name: 'conversation.view', id: 'cache-keepalive-view', order: 200, label: '缓存保温' },
+  KeepaliveView))   // 内容 = <iframe src="…/api/cache-keepalive/panel?embed=1&current=<id>">
+```
+
+- **只留页签，不要加侧边栏入口**：桌面版宿主会拦 `window.open`（`setWindowOpenHandler` 返回 null
+  但窗口其实已开），任何"多路兜底"都会变成开两个。2026-10-15 用户拍板只留页签。
+- `?embed=1` 让面板隐藏自己的页头，避免与外层标题重复。
+
+**构建 client**：
+
+```bat
+node scripts/build-client.mjs        :: → lib/client.js（esbuild；react/@deepseek-ai/* 走 external）
+```
+
+## ⚠️ 安装：带 client 的插件**不要用注入器装**
+
+必须走**官方正式安装** —— 在 profile 的 `package.json` 里加两处：
+
+```jsonc
+{
+  "dependencies": { "@dsh-external/dsh-cache-keepalive": "link:<本目录>" },
+  "dsh": { "profile": { "bundles": [ /* … */ "@dsh-external/dsh-cache-keepalive" ] } }
+}
+```
+
+**为什么**：注入器注入时会额外调 `clientModules.processOne()` 手动补一行，而
+`dsh-client-modules` 自己也会**扫已启用的 Loader 条目**各生成一行 ——
+两条路径 `rev` 不同 → 两个 URL → bundle 执行两次 → 报
+`duplicate factory registration`，整个插件装载失败。
+（注入器适合**纯 host** 插件。）
+
+**改完 client 必须重启实例**（bundle 在启动时装载，重载插件不重建渲染端模块图）。
+`npm run check` 里的 `check-imports` / `smoke-apply` 不含渲染端验证 —— 渲染端问题只能靠重启后看一眼。
+
+## 用法（工具 `cache_keepalive`）
+
+| action | 作用 |
+|---|---|
+| `status` | 查看所有会话的保温状态、上次命中率、累计花费、熔断情况 |
+| `ping` | 立刻对某会话保温一次，返回命中率与实际花费 |
+| `on` | **手动开启**该会话的自动保温（推荐的第一种用法） |
+| `off` | **手动关闭**该会话的自动保温 |
+| `auto` | 交回自动策略 |
+| `reset` | 解除某会话熔断（重置账本，之后按新记录判断） |
+
+## 用法（工具 `cache_lab` —— 测验台，可在面板「设置」页关掉）
+
+| action | 作用 |
+|---|---|
+| `settings` | 读全部生效设置（含单价、w/r 推论） |
+| `set-settings` | 改设置：直接给平铺字段（`intervalSeconds`、`priceHit/Miss/Out`、`labMode` …） |
+| `sessions` | 列本进程内会话摘要（模式、花费、上次命中率、门禁码） |
+| `timeline` | 某会话的每轮真实计费时间轴（需 `sessionId`；`granularity`=`step\|turn\|both`） |
+| `lab` | 切换试验模式（时间参数压到秒级） |
+| `experiment` | **虚拟不变量自检**（零花费、不联网、不写盘）：`spec` 传 JSON，如 `{"only":["V3"]}` / `{"lab":true}`；不传跑全部 |
+| `help` | 用法说明 |
+
+> 关掉面板「设置」页的开关 = 从工具面**注销** `cache_lab`，Agent 看不到也调不了。
+> 切换会改变工具面，所有会话的前缀缓存会失效一次。
+> **两个工具的分工、决策树、以及「哪些能力只有 CLI 有（dry-run / `--lab live` / `--lab run --json`）」见 `.tmp/tool-split.md`。**
+
+参数：
+
+| 参数 | 说明 |
+|---|---|
+| `sessionId` | 目标会话；缺省为当前会话 |
+| `prompt` | **每会话自定义**的保温问题，务必极短、答案确定 |
+| `maxTokens` | 输出上限，默认 **1** |
+| `intervalSeconds` | 保温间隔，默认 **14400（4 小时）** |
+| `maxTouches` | 最大连续保温次数，默认 **9**，硬上限 **49** |
+| `note` | 备注 |
+| `doPing` | `on`/`auto` 之后立刻试保温一次 |
+
+## 安全边界（缺一不可）
+
+1. **`tools` 原样带上** —— 它是 DeepSeek 缓存锚点（渲染序 `tools → system → messages`）的一部分。
+   去掉它前缀立刻不同，整次保温报废。所以**不能**为了"防跑飞"而禁用工具。
+2. **`maxTokens` 压到 1** —— 工具调用需要输出几十 token 的 JSON，1 token 根本发起不了，天然防跑飞。
+3. **只走 `llm.stream`，不进 agent loop** —— **绝不写会话日志**（写了会污染 surface、甚至触发压缩）。
+4. **归档不保** —— `archived` 的会话门禁直接返回 `archived`。
+   会话正在跑回合（`agent.status === 'running'`）**照保**：真回合自己会刷新缓存，我们的保温与它并行不冲突。
+5. **命中率塌了立即熔断** —— **漏一次 = 50 次保温的钱，一天收益全没**。命中率低于**熔断线**即停手
+   （`circuitHitRate`，默认 **50%**，可改 **0.05~0.9**；实测正常保温在 99.5%+、劣化的在 7%~28%，中间是空白带）。
+   熔断后**不要顺手压缩**（那时摘要调用同样要全量重算，更贵）。
+   自动解除两条：① 你之后**真的用了**这条会话（缓存已被那次请求重建）；② `circuitCooldownSeconds` 到期
+   （默认 **0** = 不按时间自动恢复）。
+
+## TTL 自适应
+
+缓存存活是**概率性**的，没有固定 TTL。本机 10,000+ 对相邻调用的实测：
+
+| 间隔 | 仍存活 |
+|---|---|
+| 5 秒 ~ 1 分 | 97% |
+| 1 ~ 5 分 | 95% |
+| 5 ~ 15 分 | 91% |
+| 15 ~ 30 分 | 80% |
+| 1 ~ 2 小时 | 75% |
+| 2 ~ 4 小时 | 89% |
+| **4 ~ 8 小时** | **50%** |
+| > 8 小时 | ~5%（21 个样本仅 1 例存活） |
+
+**8 小时是经验拐点，不是硬上限** —— 实测有一例 **12.13 小时仍 100% 命中**（同时 11.67h、13.01h
+的样本都死了），那是 ~5% 的运气，不能作为计划依据。
+
+所以间隔不写死，按**这条会话自己的账本**滚动调整（`src/ttl.ts`）：
+
+- **连续 3 次满命中（≥98%）** → 间隔 **×1.25**（少打几次 ping，更省）
+- **出现一次"差点断"（<80%）** → 间隔 **÷2**
+- 范围夹在 **[30 分钟, 6 小时]**（4~8 小时存活率已掉到 50%，不再往上试）
+- 用户在面板上显式改过间隔 → 丢掉自适应结果，从用户值重新开始
+
+## 峰谷计价（时段表 / 节假日表）
+
+**默认关闭**（`tariff.enabled = false`）：不打开就一律按基准价。
+
+打开后默认是**两段高峰**：
+
+```
+00:30 → 08:30  空闲 ×1
+08:30 → 12:00  高峰1 ×2
+12:00 → 14:30  空闲 ×1
+14:30 → 18:00  高峰2 ×2
+18:00 → 00:30  空闲 ×1     ← 跨零点：from > to 表示「到次日」
+```
+
+**「打开了峰谷计价但没设时段会怎样」——静默按 1.0 倍，不报错、不崩。**
+
+三种降级路径都有单测（`tests/tariff.test.mjs`）：
+
+| 情形 | 行为 |
+|---|---|
+| `enabled = false` | 一律基准价（`effectivePrices` 直接短路） |
+| `enabled = true` 但 `slots` 为空 | `tariffFactorAt` 返回 `{factor:1, label:'基准'}` |
+| 某时刻没被任何时段覆盖 | 同上，按 1.0 倍 |
+| 节假日命中 | **覆盖**时段倍率，**不叠乘** |
+
+计费路径真的用了它：`costAt → effectivePrices → tariffFactorAt`，
+两个记账入口（`index.ts` 的 `appendEntry`、`panel-service.ts`）都走 `costAt`。
+
+## 时间门槛（唯一一条线）
+
+```
+since = now − max(上次真实对话, 上次保温)
+since > idleLimitHours → 跳过（不管保没保过）
+```
+
+**只看这一个 `since`**：缓存刷新来自「真实对话」或「保温」两者之一，所以判断「缓存还活着吗」就该看它。
+**不要给「保过」另设更小的门槛** —— 同一个 `since` 用两套阈值逻辑上说不通（历史上曾短暂加过
+`refreshLimitHours`，已删）。
+
+- `idleLimitHours` 默认 **6 小时**（实测缓存存活 15 分钟 ~ 4 小时，6 比 8 更贴近）。
+- 从未保过 → 超过它判 `cold-window-idle`；保过 → 超过它判 `stale`。**同一个值管两种情形。**
+- `stale` 判定**排在 `too-soon` 之前**：顺序颠倒会让「超门槛但没到间隔」报成 `too-soon`
+  （用户看到「还差半小时」，实际再等半小时缓存早没了）。
+- 必须满足 `idleLimitHours > intervalSeconds`，否则那条会话一次都保不上；面板保存时会拦。
+
+### 按 provider/model 自定义
+
+`settings.modelOverrides`（键 `provider/model`，值 `{ idleLimitHours?, intervalSeconds? }`）：
+
+| 模型设了 | 用模型的 |
+| 留空 | 用通用值 |
+| 填 0 | 该模型**不保温** |
+
+判定点唯一：`effectiveLimitsOf(settings, provider, model)`（`src/core/gate-input.ts`），
+返回 `{ idleLimitMs, intervalMs, disabled, intervalOverridden }`。
+**两级匹配**：精确 `provider/model` 优先，其次按**模型名**后缀 —— 面板「模型价表」只有模型名、
+判定侧拿的是 `provider/model`，只比精确永远命不中。
+
+会话的 provider/model 来源：活会话取 `header.config`；历史会话用 `readSessionModel(logFile)`
+（日志尾部解帧取最后一次 `request/header`，`mtime+size` 缓存，与 `readLastDialogAt` 同一套省时思路）。
+
+## 经济学
+
+```
+单次保温成本 c = H × 0.02/百万
+单次冷启动成本 R = H × 1.0/百万
+净收益 net(p) = p·(R − c) − n·c        p = 你认为还会回来用这条会话的概率
+盈亏平衡     p* = n·c/(R − c) ≈ 0.0204·n
+次数硬上限   n < w/r = 50             （再多就不如让它冷掉重算）
+```
+
+| 间隔 | 保一天要几次 | 盈亏平衡恢复概率 |
+|---|---|---|
+| 1 小时 | 24 | 49% |
+| 2 小时 | 12 | 24% |
+| **4 小时** | 6 | **12%** |
+
+**⇒ 只要你有 12% 以上的概率会回来用这条会话，保温就是赚的。**
+
+间隔取提供方 TTL 减去安全边际最划算（"ping as rarely as the TTL allows"）。
+本机实测官方 API 的 TTL **约 8 小时**（7.63 小时仍命中，超过 8 小时的 21 个样本全部失效），
+故默认间隔取 **4 小时**（TTL 的一半作安全边际）。
+
+## 状态与账本
+
+存在 `$DSH_HOME/cache-keepalive/state.json`（**sidecar，绝不写进会话日志**）：
+
+```json
+{
+  "version": 1,
+  "settings": {
+    "autoEnabled": true, "autoCount": 3, "idleLimitHours": 8,
+    "intervalSeconds": 14400, "freshSeconds": 300,
+    "circuitHitRate": 0.5, "circuitCooldownSeconds": 0,
+    "maxTouches": 9, "budgetPerSession": 0.5, "maxTokens": 1,
+    "prompt": "Reply with exactly: OK",
+    "prices": { "hit": 0.02, "miss": 1, "out": 4 }
+  },
+  "sessions": { "session-xxxx": { "mode": "on", "prompt": "Reply with exactly: OK",
+                                   "maxTokens": 1, "intervalSeconds": 14400, "maxTouches": 9 } },
+  "ledger":   { "session-xxxx": [ { "at": 0, "promptTokens": 0, "hitTokens": 0, "cost": 0, "hitRate": 0.997, "touch": 1 } ] }
+}
+```
+
+- **熔断线**在 `settings.circuitHitRate`（0.05~0.9，默认 0.5）。面板**还没有**它的输入框 —— 用
+  `cache_lab` action=`set-settings`，或直接改这个字段。
+- 把熔断线**从 ≤50% 往上调到 >50%**（更严）且那一刻 `circuitCooldownSeconds` 是 **0** 时，后端会**自动把冷却改成 600 秒**
+  并在返回值里带 `notice`（面板显示为 `warning`）—— 否则一次误熔断会让那条会话一直停保，直到你真正用它。
+  只在**跨越那一次**触发，不会覆盖你自己设的冷却值。
+- `sessions` 是**逐会话策略**（`mode`=`auto|on|off`、`prompt`、`intervalSeconds`…），`ledger` 是账本（每会话最多 200 条）。
+
+## 构建
+
+**`src/**/*.ts` 是唯一真相源，DSH 直接加载它**（`package.json` 的 `main` = `./src/index.ts`，
+Node v24 原生支持 TypeScript 类型剥离）。所以：
+
+| 改了什么 | 要做什么 |
+|---|---|
+| `src/**/*.ts`（宿主半边） | **无需构建**，重启实例即可生效 |
+| `src/client/**`（渲染半边） | **需要重建 `lib/client.js`** —— `exports["./client"]` 指向它 |
+
+```
+# 只有改 client 才需要
+npx tsdown        # 或按 package.json 的 build:client 脚本
+```
+
+**`lib/` 下除 `client.js` 以外的文件是历史残次品，不要用**：它们是纯 `tsc` 转译产物，
+相对 import 仍带 `.ts` 后缀（实际文件是 `.js`），`import('./lib/index.js')` 直接
+`ERR_MODULE_NOT_FOUND`。`scripts/build.sh` 也只是给 client 用的，且依赖一个 DSH 源码
+checkout（本机没有，跑它会报 `cannot locate the dsh checkout`）。
+
+> 判据备忘：**实例进程启动时间早于 `src/index.ts` 的 mtime ⇒ 该实例跑的还是旧代码，要重启。**
+> 不要拿 `lib/index.js` 的 mtime 当判据 —— 它根本不被加载。
+
+## 源码
+
+| 文件 | 职责 |
+|---|---|
+| `src/index.ts` | 插件主体：工具注册 + 守护 tick + 门禁 |
+| `src/keepalive.ts` | 重放请求构造（`requestHeader` + `deriveMessages`）与 usage 提取 |
+| `src/econ.ts` | 定价、净收益、盈亏平衡概率、熔断阈值 |
+| `src/store.ts` | 每会话策略与账本的 sidecar 持久化 |
+
+## 已知限制
+
+- **图片**：字节在 DSH 附件库，离线不读 → 图片块降级成占位文本；图片位置 < 90% 段的会话默认拒绝保温（`--force` 可覆盖）。
+- **熔断不会立刻自愈**：两条自动解除见「安全边界」第 5 条；都不满足时只能 `cache_keepalive` action=`reset` 或手动 `on`。
+- **若提供方缓存已断**，本次保温本身就是一次全额重算 —— 熔断即为此而设。
+- **面板试验模式已删**：要用秒级参数做实验走 `cache_lab` action=`lab` 或 `cli --lab`（后端能力未删）。
