@@ -8,7 +8,7 @@
  *
  * 跑法：`node tests/store.test.mjs`（与既有 isTripped 用例同一文件）
  */
-import { mkdtempSync, readFileSync, writeFileSync, utimesSync, existsSync, statSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, utimesSync, existsSync, statSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { saveState, withStateLock, loadState, appendLedger, clearLedger, setSettings, stateMtimeOf } from '../src/store.ts'
@@ -17,15 +17,25 @@ import { saveState, withStateLock, loadState, appendLedger, clearLedger, setSett
  * 造临时目录。
  * ⚠️ 这里用 `mkdtempSync(tmpdir())` 是**故意的**：本仓库规则要求业务测试走 `tmproot()`，
  * 但 `store` 是仓库内独立模块、测试不依赖 tests/_tmp.js；且本文件只在开发期跑。
+ *
+ * 但「故意不走 tmproot」不等于「可以留垃圾」：系统 tmp 里每跑一轮会积几十个 `ck-store-*`。
+ * 所以这里自己登记 + 退出时统一删（只删本文件建的，`force` 容错）。
  */
+const TMPS = []
+process.on('exit', () => {
+  for (const d of TMPS) { try { rmSync(d, { recursive: true, force: true }) } catch { /* 清理失败不影响测试结论 */ } }
+})
+
 function tmpStateFile() {
   const dir = mkdtempSync(join(tmpdir(), 'ck-store-'))
+  TMPS.push(dir)
   return join(dir, 'state.json')
 }
 
 /** 造一个「父目录还不存在」的状态文件路径（模拟全新部署）。 */
 function freshDeployFile() {
   const dir = mkdtempSync(join(tmpdir(), 'ck-fresh-'))
+  TMPS.push(dir)
   return join(dir, 'cache-keepalive', 'state.json')
 }
 

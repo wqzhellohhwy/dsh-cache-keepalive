@@ -85,6 +85,9 @@ export function idleLimitMsOf(state: State): number {
  * @param model 会话的 model
  * @returns `{ idleLimitMs, intervalMs, disabled }`
  */
+/** per-model 间隔的**硬下限（秒）**：低于它一律按它用（防「填 3 当成 3 小时」实际 3 秒）。 */
+export const PER_MODEL_INTERVAL_MIN_SEC = 300
+
 export function effectiveLimitsOf(
   settings: State['settings'],
   provider: string | undefined,
@@ -103,11 +106,26 @@ export function effectiveLimitsOf(
    */
   const overrides = settings.modelOverrides ?? {}
   let override = key === undefined ? undefined : overrides[key]
+  /**
+   * **后缀匹配**（键含不含 `/` 都算）：
+   * 面板存的键可能是 `deepseek-v4.1-flash-1017`，也可能是 `tokenrhythm-title/deepseek-v4.1-flash-1017`，
+   * 而判定侧拿到的 provider 常常对不上（`tokenrhythm` vs `tokenrhythm-title`）——
+   * 所以按**键的最后一节**与模型名比。
+   *
+   * ⚠️ **多档命中不猜**：同名模型挂多家供应商时，只要覆盖值不一致就回落全局；
+   * 值完全一致才用（那是同一份配置的两条写法，无歧义）。
+   */
   if (override === undefined && typeof model === 'string' && model !== '') {
-    const byModel = Object.keys(overrides).filter((k) => !k.includes('/') && (k === model || key?.endsWith('/' + k) === true))
-    /** 多个命中时取最长的键（与价格表「最长包含」同思路）。 */
-    byModel.sort((a, b) => b.length - a.length)
-    if (byModel.length > 0) override = overrides[byModel[0]]
+    const hits = Object.keys(overrides).filter((k) => k === model || (k.split('/').pop() ?? '') === model)
+    if (hits.length === 1) override = overrides[hits[0]]
+    else if (hits.length > 1) {
+      const first = overrides[hits[0]]
+      const same = hits.every((k) => {
+        const o = overrides[k]
+        return o?.intervalSeconds === first?.intervalSeconds && o?.idleLimitHours === first?.idleLimitHours
+      })
+      if (same) override = first
+    }
   }
 
   /** 通用值。 */
@@ -128,7 +146,7 @@ export function effectiveLimitsOf(
 
   return {
     idleLimitMs: idleHours === null ? baseIdleMs : Math.max(60_000, idleHours * 3600_000),
-    intervalMs: intervalSec === null ? baseIntervalMs : Math.max(1, intervalSec) * 1000,
+    intervalMs: intervalSec === null ? baseIntervalMs : Math.max(PER_MODEL_INTERVAL_MIN_SEC, intervalSec) * 1000,
     disabled: false,
     /** 模型没设间隔时，调用方应回落到**会话策略**（`policy.intervalSeconds`）而不是通用值。 */
     intervalOverridden: intervalSec !== null,
@@ -144,15 +162,15 @@ export function freshMsOf(state: State): number {
 }
 
 /**
- * 子代理专用间隔（毫秒）：`settings.subagentIntervalSeconds`，脏值回落默认 120 秒。
+ * 子代理生效间隔（毫秒）—— **与主会话同源**。
  *
- * 子代理寿命实测 59s / 86s / 127s / 314s …… 最长 2910s；用主会话的 4 小时间隔
- * 等于永远等不到窗口（这就是「子代理也算」看着失效的真因）。最小 1 秒，与 `intervalOf` 同口径。
+ * 用户 2026-10-25 口径：「子代理和闲置时间一致」。历史上这里返回
+ * `settings.subagentIntervalSeconds`（默认 120 秒），等于让子代理绕过主会话门槛：
+ * 主会话 4 小时、子代理 2 分钟，同一条会话换个身份结论就翻了。
+ * 现在恒等于主间隔；`subagentIntervalSeconds` 字段仍能被旧配置读到但**不参与判定**。
  */
 export function subagentIntervalMsOf(state: State): number {
-  const sec = Number(state.settings.subagentIntervalSeconds)
-  const n = Number.isFinite(sec) && sec > 0 ? sec : (DEFAULT_SETTINGS.subagentIntervalSeconds ?? 120)
-  return Math.max(1, Math.round(n * 1000))
+  return intervalOf(state, {})
 }
 
 /** 组装门禁输入。 */
@@ -166,7 +184,12 @@ export function buildGateInput(state: State, opts: BuildGateInputOptions): GateI
    * 覆盖里填 `0` = 「该模型不保温」：`idleLimitMs` 置 0 让 `idleFirst > idleLimitMs` 立刻成立
    * ⇒ 判 `cold-window-idle` 跳过；`intervalMs` 也置 0，免得先被 `too-soon` 拦住。
    */
-  const limits = effectiveLimitsOf(state.settings, opts.provider, opts.model)
+  /**
+   * **调用方拿不到 model 时用账本末条兜底**（真机 537/550 就是这样：`readSessionModel` 读不出
+   * 或调用点没传）。不兜底的话 per-model 覆盖在判定层永远不生效 —— 面板设了门槛、门禁却按全局走。
+   * 反例（账本里也没 model）→ 仍是 undefined → 回落全局，不瞎猜。
+   */
+  const limits = effectiveLimitsOf(state.settings, opts.provider ?? last?.provider, opts.model ?? last?.model)
   /**
    * 间隔的优先级：**模型覆盖 > 会话策略（`policy.intervalSeconds`）> 通用**。
    * `effectiveLimitsOf` 已按两级匹配算出覆盖值；**`disabled` 时它返回 0**，
@@ -190,7 +213,7 @@ export function buildGateInput(state: State, opts: BuildGateInputOptions): GateI
     hasRoute: opts.hasRoute,
     intervalMs,
     /** 只在子代理时生效（`decideWarm` 判 `isSubagent`）；普通会话不看它，给出去零成本。 */
-    subagentIntervalMs: subagentIntervalMsOf(state),
+    subagentIntervalMs: intervalMs,
     isSubagent: opts.isSubagent === true,
     idleLimitMs: limits.idleLimitMs,
     freshMs: freshMsOf(state),

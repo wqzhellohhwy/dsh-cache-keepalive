@@ -130,10 +130,15 @@ export function decideWarm(input: GateInput): GateDecision {
    * 只换间隔的话，`--serve --auto`（`WARM_DELAY_MS=120000`）下门槛是 120+120=240 秒，
    * 而子代理多数活不到 240 秒，等于没修。
    */
-  const isSubagent = input.isSubagent === true
-  const subMs = Number(input.subagentIntervalMs)
-  const effInterval = isSubagent && Number.isFinite(subMs) && subMs > 0 ? subMs : intervalMs
-  const delay = isSubagent ? 0 : Math.max(0, Number(input.delayMs) || 0)
+  /**
+   * **子代理与主会话同源**：不再有独立短间隔（用户 2026-10-25 口径「子代理和闲置时间一致」）。
+   * `subagentIntervalMs` 字段保留只为兼容调用方，**不参与间隔计算**。
+   *
+   * 唯一剩下的子代理特例是**免除网页版 2 分钟延后**（`--serve --auto` 的 `delayMs`）：
+   * 那 2 分钟是给「无实例面板可能看不到最新日志」留的安全垫，子代理命短，等不起。
+   */
+  const effInterval = intervalMs
+  const delay = input.isSubagent === true ? 0 : Math.max(0, Number(input.delayMs) || 0)
   /**
    * 渲染说明：`long` 为真时走**长档**（用户覆盖 `key:long` → `detailLong`），两档互不回退。
    * 没有定义的门禁码回落到老行为（用户覆盖 → 默认表），不影响任何现有文案。

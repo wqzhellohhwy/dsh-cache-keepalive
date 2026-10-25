@@ -185,13 +185,46 @@ export function normalizePriceTable(input: unknown): PriceTable {
 /**
  * 按模型名查价。
  *
- * 匹配顺序：精确名 → 最长包含（模型名含表键，如 `deepseek-flash-2026` 命中 `deepseek-flash`）
- * → 基准价兜底。取最长包含是为了避免 `deepseek` 这种短键把 `deepseek-reasoner` 也吞掉。
+ * 匹配顺序（与 `core/gate-input.ts` 的 `effectiveLimitsOf` 同口径，两处必须一致）：
+ * 1. 精确模型名
+ * 2. 精确 `provider/model`（价表键就是这种形态）
+ * 3. 后缀匹配：价表键 `provider/model` → 尾段等于模型名（**唯一命中才用**，多家同后缀不猜）
+ * 4. 老兜底：模型名里包含表键（`deepseek-flash-2026` 命中 `deepseek-flash`，取最长）
+ * 5. 都不中 → 基准价
+ *
+ * 第 2/3 级是「改价不生效」的根因修复：DSH 的 `model` 不带 provider，
+ * 而价表键带 provider，只做第 1/4 级就永远回落基准价。
  */
-export function priceForModel(model: string | undefined, table: PriceTable, fallback: Prices = DEFAULT_PRICES): ModelPrices {
+export function priceForModel(
+  model: string | undefined,
+  table: PriceTable,
+  fallback: Prices = DEFAULT_PRICES,
+  provider?: string,
+): ModelPrices {
   const name = (model ?? '').trim().toLowerCase()
   if (name === '') return fallback
   if (table[name] !== undefined) return table[name]
+  const prov = (provider ?? '').trim().toLowerCase()
+  if (prov !== '' && table[prov + '/' + name] !== undefined) return table[prov + '/' + name]
+  let suffixHits: string[] = []
+  for (const key of Object.keys(table)) {
+    const tail = key.toLowerCase().split('/').pop() ?? ''
+    if (tail === name) suffixHits.push(key)
+  }
+  if (suffixHits.length === 1) return table[suffixHits[0]]
+  /**
+   * 多档后缀命中：**值完全一致才用**（同一份配置的两种写法，无歧义）；
+   * 不一致就是「同名模型挂多家供应商、价格不同」→ 不猜，往下走老兜底/基准价。
+   */
+  if (suffixHits.length > 1) {
+    const first = table[suffixHits[0]]
+    const same = suffixHits.every((k) => {
+      const p = table[k]
+      return p.hit === first.hit && p.miss === first.miss && p.out === first.out
+        && p.tariff === first.tariff && p.holiday === first.holiday
+    })
+    if (same) return first
+  }
   let best = ''
   for (const key of Object.keys(table)) {
     if (key !== '' && name.includes(key) && key.length > best.length) best = key
@@ -437,8 +470,9 @@ export function effectivePrices(
   table: PriceTable,
   tariff: Tariff,
   epochMs: number,
+  provider?: string,
 ): { prices: Prices; factor: number; label: string; model: string; holiday?: string } {
-  const byModel = priceForModel(model, table, base)
+  const byModel = priceForModel(model, table, base, provider)
   if (!tariff.enabled) {
     return { prices: byModel, factor: 1, label: '基准', model: model ?? '' }
   }

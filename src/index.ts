@@ -44,6 +44,9 @@ import {
   appendLabPending,
   ledgerOf,
   loadState,
+  releaseInflight,
+  tryClaimInflight,
+  withStateLock,
   policyOf,
   saveState,
   settleLabPending,
@@ -72,7 +75,8 @@ import { applySettingsPatch, labExpireIfDue, labRestoreBackup, labSnapshotOf } f
 import { KNOWN_RED, runAll } from './core/lab/invariants.ts'
 import { labVerdict, promptTokensEstimate, worstCostOf } from './core/lab/guard.ts'
 import { buildReport } from './core/lab/report.ts'
-import { buildGateInput } from './core/gate-input.ts'
+import { buildGateInput, effectiveLimitsOf } from './core/gate-input.ts'
+import { cleanSubagentTitle, isUselessTitle } from './core/sessions.ts'
 import { modelChangedOf } from './core/model-switch.ts'
 import { rewriteFpOf, rewriteOfFile } from './core/rewrite.ts'
 import { markItem } from './core/rewrite-probe.ts'
@@ -240,6 +244,13 @@ function mergeState(mem: State, disk: State): State {
   const cy = { ...(disk.cycles ?? {}) }
   for (const [id, v] of Object.entries(mem.cycles ?? {})) if (cy[id] === undefined) cy[id] = v
   merged.cycles = cy
+  /** 在途标记取并集、同 id 取更晚的：本进程刚抢的标记不能因为「磁盘账本更少」这条合并路径被丢掉。 */
+  const ifl = { ...(disk.inflight ?? {}) }
+  for (const [id, m] of Object.entries(mem.inflight ?? {})) {
+    const cur = ifl[id]
+    if (cur === undefined || cur.at < m.at) ifl[id] = m
+  }
+  merged.inflight = ifl
   return merged
 }
 
@@ -524,6 +535,20 @@ function mergeState(mem: State, disk: State): State {
    * `stateOf(session, 'title')` 返回**当前实时标题**。
    * 用 `ctx.get` **软取**（不进 inject）—— 投影服务缺席时自动回落，不影响插件加载。
    */
+  /**
+   * 子代理标题清洗（**唯一入口**）：列表、详情、候选三处都过它，避免各自一套口径。
+   *
+   * 真实数据：193 条子代理的官方标题是 `<system-reminder> You are teammate "impl`（被截断）。
+   * 清洗后仍是「无用标题」（空 / 裸 id / 等于工作目录名）时保持原样 —— 采用与否交给调用方判断。
+   */
+  function cleanTitleOf(raw: string | undefined, cwd?: string): string {
+    const s = String(raw ?? '').trim()
+    if (s === '') return ''
+    const cleaned = cleanSubagentTitle(s)
+    if (cleaned === undefined) return s
+    return isUselessTitle(cleaned, cwd) ? s : cleaned
+  }
+
   function titleOf(agent: AgentLike | undefined, fallbackMeta?: SessionRow): string {
     if (agent !== undefined) {
       const proj = ctx.get('sessionProjections') as
@@ -531,7 +556,7 @@ function mergeState(mem: State, disk: State): State {
         | undefined
       try {
         const live = proj?.stateOf?.(agent.session, 'title')
-        if (typeof live === 'string' && live.trim() !== '') return live.trim()
+        if (typeof live === 'string' && live.trim() !== '') return cleanTitleOf(live)
       } catch {
         /* 投影未就绪/版本不符 → 落回磁盘索引 */
       }
@@ -545,9 +570,9 @@ function mergeState(mem: State, disk: State): State {
     const id = String(agent?.session?.id ?? fallbackMeta?.id ?? '')
     if (id !== '') {
       const fromProj = readProjectionTitle(dshHome, id)
-      if (fromProj !== undefined) return fromProj
+      if (fromProj !== undefined) return cleanTitleOf(fromProj)
     }
-    return fallbackMeta?.title.trim() ?? ''
+    return cleanTitleOf(fallbackMeta?.title)
   }
 
   /**
@@ -640,7 +665,77 @@ function mergeState(mem: State, disk: State): State {
   }
 
   /** 一次保温。`via` 记录触发方式，便于面板区分自动/手动/面板/工具/CLI。 */
+  /**
+   * **跨进程抢「正在保温」标记**。
+   *
+   * 必须在 `withStateLock` 的临界区内**重新 `loadState()`** —— 内存 `state` 可能是几秒前的快照，
+   * 里面没有别的进程刚写进去的标记，拿它判等于没判（两个写者都读到「无标记」就都放行了）。
+   * 抢到立刻落盘，让另一个进程下一次 load 就能看见。
+   *
+   * @param by 谁在抢（`auto` / `panel` / `tool` / `cli`）
+   */
+  const claimPingInflight = (id: string, by: string): { ok: boolean; detail: string } => {
+    const file = stateFile
+    try {
+      let ok = false
+      withStateLock(file, () => {
+        const fresh = withOverride(loadState(file))
+        ok = tryClaimInflight(fresh, id, by)
+        if (ok) saveState(fresh, file)
+      })
+      if (ok) return { ok: true, detail: '' }
+      return { ok: false, detail: '已有保温在飞（另一入口正在保这条会话），本次跳过不花钱' }
+    } catch (e) {
+      /** 抢标记失败**不能**变成「拒绝保温」—— 那会让用户点了没反应。放行并留日志。 */
+      log('抢在途标记失败（放行）：' + String(e))
+      return { ok: true, detail: '' }
+    }
+  }
+
+  /** 释放在途标记并落盘。释放失败无所谓：`INFLIGHT_TTL_MS`（60 秒）后自然过期。 */
+  const releasePingInflight = (id: string): void => {
+    const file = stateFile
+    try {
+      withStateLock(file, () => {
+        const fresh = withOverride(loadState(file))
+        releaseInflight(fresh, id)
+        saveState(fresh, file)
+      })
+    } catch { /* 交给 TTL 兜底 */ }
+  }
+
+  /**
+   * 保温（活会话）——**外层只管互斥，内层 `pingInner` 才是真逻辑**。
+   *
+   * 为什么用「改名 + 包一层」而不是在长函数中间插 try/finally：
+   * `pingInner` 里有十几处 `return`，手工包容易漏掉一处就把这条会话堵到过期。
+   */
   async function ping(
+    agent: AgentLike,
+    via: 'auto' | 'panel' | 'tool' | 'cli' | 'manual' = 'manual',
+    signal?: AbortSignal,
+  ): Promise<{ entry?: LedgerEntry; result: string }> {
+    syncState()
+    const id = String(agent.session.id)
+    /**
+     * **门禁先判、抢占在后**：`check-guard` 的契约是「被拒后 state.json 未被改写」。
+     * 抢占要写盘（让别的进程看得见），所以它必须发生在门禁放行之后。
+     */
+    const guardEarly = spendGuard(id)
+    if (guardEarly !== undefined) return { result: guardEarly }
+    const claim = claimPingInflight(id, via)
+    if (!claim.ok) {
+      log('跳过保温 ' + shortId(id) + '：' + claim.detail)
+      return { result: claim.detail }
+    }
+    try {
+      return await pingInner(agent, via, signal)
+    } finally {
+      releasePingInflight(id)
+    }
+  }
+
+  async function pingInner(
     agent: AgentLike,
     via: 'auto' | 'panel' | 'tool' | 'cli' | 'manual' = 'manual',
     signal?: AbortSignal,
@@ -883,7 +978,32 @@ function mergeState(mem: State, disk: State): State {
    * 返回形与 `ping(agent)` 一致（`{ entry?, result }`），供 **tick 自动路径**与 `/ping` 路由共用。
    * **不要各写一份** —— `markItem` 分叉的教训（一份漏字段，两边口径就不同）。
    */
+  /**
+   * 保温（离线装配）—— 与 `ping()` 同一个在途标记：活会话和离线会话抢的是**同一把锁**，
+   * 否则「面板点活会话 + CLI 保离线」会在同一时刻对同一条会话各发一次。
+   */
   async function pingOffline(
+    row: SessionRow,
+    via: LedgerEntry['via'],
+    force?: boolean,
+  ): Promise<{ entry?: LedgerEntry; result: string }> {
+    syncState()
+    /** 同 `ping()`：门禁先判，被拒的路径绝不写盘。 */
+    const guardEarly = spendGuard(row.id)
+    if (guardEarly !== undefined) return { result: guardEarly, fatal: true }
+    const claim = claimPingInflight(row.id, via ?? 'auto')
+    if (!claim.ok) {
+      log('跳过保温 ' + shortId(row.id) + '：' + claim.detail)
+      return { result: claim.detail }
+    }
+    try {
+      return await pingOfflineInner(row, via, force)
+    } finally {
+      releasePingInflight(row.id)
+    }
+  }
+
+  async function pingOfflineInner(
     row: SessionRow,
     via: LedgerEntry['via'],
     force?: boolean,
@@ -1266,6 +1386,8 @@ function mergeState(mem: State, disk: State): State {
         },
         /** **展示**花费按**当前价格**重算（改价后历史数据跟着变）；预算/熔断仍用存储 `e.cost`。 */
         spend: spendAtCurrentPrices(led, state.settings).cost,
+        /** 预算口径：真实花过的钱（改价不影响）。 */
+        ledgerSpend: led.reduce((sum, e) => sum + e.cost, 0),
         /** 当前保温周期号。 */
         cycle: cycleOf(state, id),
         /** 本周期花费（**账本口径**「总花费」= 全部周期之和，永不减少；判定方在用，别改）。 */
@@ -1281,7 +1403,20 @@ function mergeState(mem: State, disk: State): State {
         tripped: trippedNow(id),
         prompt: policy.prompt ?? '',
         maxTokens: policy.maxTokens ?? state.settings.maxTokens,
-        intervalSeconds: effectiveIntervalSeconds(id, policy),
+        /**
+         * **生效间隔（秒）**：与门禁/自动候选同一套 per-model 覆盖（`effectiveLimitsOf`）。
+         * 只读 `policy.intervalSeconds ?? settings.intervalSeconds` 完全不吃 `modelOverrides`，
+         * 用户按模型填了间隔却看到全局值 = 「以为没生效」。
+         */
+        intervalSeconds: (() => {
+          const m = readSessionModel(row?.logFile ?? '')
+          /** model 的兜底：日志头常拿不到，账本末条一直记着。 */
+          const lastLed = led[led.length - 1]
+          const model = m?.model ?? lastLed?.model
+          const lim = effectiveLimitsOf(state.settings, m?.provider, model)
+          if (model === undefined || lim.intervalMs <= 0) return effectiveIntervalSeconds(id, policy)
+          return Math.round(Math.max(1, lim.intervalMs / 1000))
+        })(),
         /** 你设的基准间隔（自适应可能把它改掉，面板要能标出「自适应 ← 你设的 X」）。 */
         baseIntervalSeconds: policy.intervalSeconds ?? state.settings.intervalSeconds,
         adaptedSeconds: policy.adaptedSeconds ?? null,
@@ -1400,14 +1535,16 @@ function mergeState(mem: State, disk: State): State {
      * 后续 08:40 高峰）那样算出来的整轮金额与它自己的单步明细对不上，
      * 也与面板顶部按单次调用重算的 summary 对不上（实测差 1.5 倍）。
      */
-    const turnAgg = new Map<number, { cost: number; factors: Set<number>; labels: Set<string> }>()
+    const turnAgg = new Map<number, { cost: number; factors: Set<number>; labels: Set<string>; models: Set<string> }>()
     if (gran !== 'step') {
       for (const r of rounds) {
         const c = costAt(
           { cacheReadTokens: r.hitTokens, inputTokens: r.missTokens, outputTokens: r.outputTokens },
-          s.prices, r.model, s.pricesByModel, s.tariff, r.time,
+          s.prices, r.model, s.pricesByModel, s.tariff, r.time, r.provider,
         )
-        const cur = turnAgg.get(r.turn) ?? { cost: 0, factors: new Set<number>(), labels: new Set<string>() }
+        const cur = turnAgg.get(r.turn) ?? { cost: 0, factors: new Set<number>(), labels: new Set<string>(), models: new Set<string>() }
+        /** 一轮里换过模型：记下全部，输出时多于一个就把 model 留空（不许只取最后一笔）。 */
+        if (r.model !== '') cur.models.add(r.model)
         cur.cost += c.cost
         cur.factors.add(c.factor)
         if (c.factor !== 1) cur.labels.add(c.label)
@@ -1450,6 +1587,8 @@ function mergeState(mem: State, disk: State): State {
         const factors = agg?.factors ?? new Set<number>([1])
         const factor = factors.size === 1 ? [...factors][0] : 0
         const factorLabel = factors.size === 1 ? ([...(agg?.labels ?? [])][0] ?? '') : '跨时段'
+        /** 一轮内的模型集合：多于一个就留空 model，另给 models 清单（面板据此显示「换过模型」）。 */
+        const turnModels = [...(agg?.models ?? new Set())];
         items.push({
           kind: 'round',
           gran: 'turn',
@@ -1459,7 +1598,8 @@ function mergeState(mem: State, disk: State): State {
           /** 一轮里有几步 —— 面板显示成 `T3(×2步)`。 */
           steps: t.steps,
           provider: t.provider,
-          model: t.model,
+          models: turnModels,
+          model: turnModels.length === 1 ? turnModels[0] : '',
           hitTokens: t.hitTokens,
           missTokens: t.missTokens,
           outputTokens: t.outputTokens,
@@ -1517,7 +1657,7 @@ function mergeState(mem: State, disk: State): State {
         s.prices, r.model, s.pricesByModel, s.tariff, r.time,
       ).cost
     }
-    const warmCostSum = warms.reduce((sum, w) => sum + recomputeCost(w, state.settings).cost, 0)
+    const warmCostSum = spendAtCurrentPrices(warms, state.settings).cost
 
     return {
       ok: true,
@@ -1536,7 +1676,7 @@ function mergeState(mem: State, disk: State): State {
         warms: warms.length,
         cycle: cycleOf(state, row.id),
         cycleWarms: warms.filter((w) => (w.cycle ?? 1) === cycleOf(state, row.id)).length,
-        cycleWarmCost: warms.filter((w) => (w.cycle ?? 1) === cycleOf(state, row.id)).reduce((x, w) => x + recomputeCost(w, state.settings).cost, 0),
+        cycleWarmCost: spendAtCurrentPrices(warms.filter((w) => (w.cycle ?? 1) === cycleOf(state, row.id)), state.settings).cost,
         roundCost,
         warmCost: warmCostSum,
         totalCost: roundCost + warmCostSum,
@@ -1926,7 +2066,7 @@ function mergeState(mem: State, disk: State): State {
       const last = led[led.length - 1]
       const act = lastActiveOf(id)
       const gate = decideWarm(gateInputFor(agent))
-      const spend = led.reduce((sum, e) => sum + e.cost, 0)
+      const spend = spendAtCurrentPrices(led, state.settings).cost
       lines.push(`  ${shortId(id)}  mode=${policy.mode}  ${String(agent.status ?? '?')}`
         + `  花费 ${yuan(spend)}/${led.length}次`
         + (last !== undefined ? `  上次命中 ${(last.hitRate * 100).toFixed(1)}%` : '  还没保过')
@@ -2304,7 +2444,12 @@ let tickStartedAt = 0
            *
            * 反过来也**不能滤过头**（B9）：开关打开时手动强制照常生效。
            */
-          if (row.origin === 'subagent' && state.settings.autoAllowSubagent !== true) continue
+          /**
+           * 子代理过滤：**双条件** —— 旧的「子代理也算」总开关关着、且新的「子代理条数」没填（≤0）才跳过。
+           * 只认总开关的话，用户在「子代理条数」里填了 2 仍会被这道过滤拦死（S1）。
+           */
+          if (row.origin === 'subagent' && state.settings.autoAllowSubagent !== true
+            && (state.settings.autoCountSubagent ?? 0) <= 0) continue
           targets.add(row.id)
         }
       }

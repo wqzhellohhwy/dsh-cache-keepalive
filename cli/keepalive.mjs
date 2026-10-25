@@ -341,9 +341,11 @@ if (process.argv.slice(2).some((a) => a === '--lab' || a.startsWith('--lab='))) 
   }
 }
 
-const { listSessions, readRounds, DEFAULT_HEAD_BYTES } = await import(pathToUrl(join(SRC, 'core', 'sessions.ts')))
+const { listSessions, readLastDialogAt, readRounds, DEFAULT_HEAD_BYTES } = await import(pathToUrl(join(SRC, 'core', 'sessions.ts')))
 const { assembleSession, refuseForImages } = await import(pathToUrl(join(SRC, 'core', 'assemble.ts')))
 const { readRuntime } = await import(pathToUrl(join(SRC, 'core', 'panel-service.ts')))
+/** 展示花费的唯一入口（逐笔按当前价重算）—— 与插件、离线面板同一份实现。 */
+const { spendAtCurrentPrices } = await import(pathToUrl(join(SRC, 'core', 'ledger-entry.ts')))
 const { providerRefusal, warmOffline } = await import(pathToUrl(join(SRC, 'core', 'warm-offline.ts')))
 const { loadProviders } = await import(pathToUrl(join(SRC, 'core', 'providers.ts')))
 const { readAttachment } = await import(pathToUrl(join(SRC, 'core', 'attachments.ts')))
@@ -354,12 +356,14 @@ const { buildGateInput } = await import(pathToUrl(join(SRC, 'core', 'gate-input.
 const { costAt, hitRate, normalizePrices, priceForModel, promptTokens, scalePrices, BREAK_CIRCUIT_HIT_RATE } = await import(pathToUrl(join(SRC, 'econ.ts')))
 const {
   loadState, saveState, appendLedger, policyOf, ledgerOf, statePath, isTripped,
-  cycleOf, cycleSpendOf, touchCountOf, withStateLock,
+  cycleOf, cycleSpendAtCurrentPrices, cycleSpendOf, touchCountOf, withStateLock, tryClaimInflight, releaseInflight,
 } =
   await import(pathToUrl(join(SRC, 'store.ts')))
 const { labVerdict, labAllowsForward, worstCostOf, promptTokensEstimate, runLabAttempts, stripPricePatch } = await import(pathToUrl(join(SRC, 'core', 'lab', 'guard.ts')))
 const { labExpireIfDue } = await import(pathToUrl(join(SRC, 'core', 'settings.ts')))
 const { readSessionMeta, metaToRow } = await import(pathToUrl(join(SRC, 'core', 'session-meta.ts')))
+/** 指纹实现是**零依赖**的独立模块：`keepalive.ts` 依赖 `@deepseek-ai/dsh-llm`，CLI 不能引它，但两边必须算同一个指纹。 */
+const { fingerprintOf, isCurrentFingerprint } = await import(pathToUrl(join(SRC, 'core', 'fingerprint.ts')))
 
 function pathToUrl(p) {
   return 'file:///' + p.replace(/\\/g, '/')
@@ -708,7 +712,7 @@ async function cmdList() {
   console.log('-'.repeat(92))
   for (const r of rows.slice(0, 40)) {
     const led = ledgerOf(state, r.id)
-    const spend = led.reduce((s, e) => s + e.cost, 0)
+    const spend = spendAtCurrentPrices(led, state.settings).cost
     const mode = policyOf(state, r.id).mode
     const tripped = isTripped(state, r.id, BREAK_CIRCUIT_HIT_RATE, r.mtime) ? '熔断' : ''
     console.log(
@@ -916,7 +920,7 @@ async function prepareWarm(id, opts = {}) {
   /** 次数分「本期」与「累计」两条，与插件侧 `spendGuard()` 同口径：清账只重置本期。 */
   const touchCycle = touchCountOf(state, row.id)
   const touchTotal = last?.touch ?? 0
-  const spent = cycleSpendOf(state, row.id)
+  const spent = cycleSpendAtCurrentPrices(state, state.settings, row.id)
   const maxTouches = policy.maxTouches ?? state.settings.maxTouches
   const maxTouchesTotal = state.settings.maxTouchesTotal ?? 0
   /**
@@ -1010,6 +1014,37 @@ async function prepareWarm(id, opts = {}) {
   ))
   if (fullSkip !== undefined) return fullSkip
   /**
+   * **花钱之前先比前缀指纹**（与插件侧 `index.ts` 同一判据、同一个 `fingerprintOf`）。
+   *
+   * 指纹变了 = 缓存锚点被改写（换实例 / 前缀里的运行时上下文变了）= 这次保必定 0 命中。
+   * 实测（2026-10-17）：同一会话 5.5 小时前命中 99.9%，换实例后再保，promptTokens 一字不差
+   * （275902 → 275902）却命中 0%，一次白烧 0.43 元。
+   *
+   * ⚠️ 算指纹**必须排除末尾那条「保温问题」**：它带随机 UUID 的 `id`，短会话的前 8 条切片会把它算进去，
+   * 同一条会话两次算出来的指纹就不同 → 永远判「前缀变了」、永远停保。
+   *
+   * ⚠️ 判据必须带 `isCurrentFingerprint`：旧账本里的指纹是无版本前缀的 16 位 hex，
+   * 直接比对必然不等 → 升级那一刻把所有有记录的会话判成 `prefix-changed`（零停保失效）。
+   */
+  const fingerprint = fingerprintOf({ tools: plan.tools, messages: plan.messages.slice(0, -1) })
+  const prevFp = led[led.length - 1]?.fingerprint
+  if (isCurrentFingerprint(prevFp) && prevFp !== fingerprint) {
+    /**
+     * 恢复通道与插件 `prefixStale` 同源：指纹变过之后会话被**真实使用过**（对话时间晚于上次保温），
+     * 说明缓存已被那次真实请求重建 —— 这时放行。没有它就会死锁（跳过时不记账 → 指纹永远停在旧的）。
+     */
+    const lastAt = led[led.length - 1]?.at ?? 0
+    const usedSince = readLastDialogAt(row.logFile) > lastAt
+    if (!usedSince) {
+      return {
+        ok: false,
+        code: 'prefix-changed',
+        detail: '前缀指纹变了（' + prevFp + ' → ' + fingerprint + '）：缓存锚点已被改写，这次保是 0 命中。'
+          + '等你在会话里发一条真实消息（重建缓存）后就会自动放行。',
+      }
+    }
+  }
+  /**
    * **安全阀：含图片且位置靠前的会话，默认不保。**
    *
    * 离线拿不到图片字节，装配出的前缀会与真实请求不同。这时保温不只是「白花钱」——
@@ -1032,7 +1067,7 @@ async function prepareWarm(id, opts = {}) {
         + '从附件库读不到字节 —— 保了会把错误的前缀写进缓存、挤掉对的',
     }
   }
-  return { ok: true, state, row, plan, apiKey, prompt, policy, intervalMs, third: useThird }
+  return { ok: true, state, row, plan, apiKey, prompt, policy, intervalMs, third: useThird, fingerprint }
 }
 
 /** 门禁/准备失败时的可读提示（`--once` 与面板共用）。 */
@@ -1051,6 +1086,55 @@ function describeSkip(r) {
 let lastFailKind = '';
 
 /**
+ * 抢跨进程「正在保温」标记 —— 与插件**同一个字段、同一把锁**（`state.json` 的 `inflight`）。
+ *
+ * 必须锁内重新 `loadState()`：锁外的内存快照没有别的进程刚写进去的标记，拿它判等于没判。
+ * 抢标记抛错时**放行**并留日志 —— 抢不到标记不该变成「点了没反应」。
+ */
+function claimInflight(id, by) {
+  try {
+    let ok = false;
+    withStateLock(statePath(), () => {
+      const fresh = loadState();
+      ok = tryClaimInflight(fresh, id, by);
+      if (ok) saveState(fresh, statePath());
+    });
+    return ok;
+  } catch (e) {
+    console.log('抢在途标记失败（放行）：' + String((e && e.message) || e));
+    return true;
+  }
+}
+
+/** 释放在途标记。释放失败无所谓：`INFLIGHT_TTL_MS`（60 秒）后自然过期。 */
+function releaseInflightMark(id) {
+  try {
+    withStateLock(statePath(), () => {
+      const fresh = loadState();
+      releaseInflight(fresh, id);
+      saveState(fresh, statePath());
+    });
+  } catch { /* 交给 TTL 兜底 */ }
+}
+
+/**
+ * 发一次保温请求 —— **外层只管互斥，内层 `sendWarmInner` 才是真逻辑**。
+ * 用「改名 + 包一层」而不是在内层插 try/finally：内层有多处 return，手工包容易漏一处，
+ * 漏掉就把这条会话堵到 `INFLIGHT_TTL_MS` 过期。
+ */
+async function sendWarm(r) {
+  const id = r.row.id;
+  if (!claimInflight(id, 'cli')) {
+    return { ok: false, ms: 0, model: r.plan.config?.model, error: '已有保温在飞（另一入口正在保这条会话），本次跳过不花钱' };
+  }
+  try {
+    return await sendWarmInner(r);
+  } finally {
+    releaseInflightMark(id);
+  }
+}
+
+/**
  * 发一次保温请求。**第三方 provider 走 `warmOffline()`**（它按 OpenAI 协议直连，
  * 用自己的 key 与 baseURL），其余走本地 Anthropic 直连。
  * 两条路的返回都归一成 `{ ok, usage, ms, model, raw?, error? }`。
@@ -1058,7 +1142,7 @@ let lastFailKind = '';
  * **试验护栏在这里**：这是 CLI 全部发请求路径的唯一汇聚点，`labVerdict()` 不通过就不发。
  * 非试验模式下 `labVerdict()` 第一条就放行 —— 生产行为零变化。
  */
-async function sendWarm(r) {
+async function sendWarmInner(r) {
   /**
    * **G2 预留 + 三道护栏**：用与插件 `ping()` **同一个** `worstCostOf()` 算本次最坏花费，
    * 再交给同一个 `labVerdict()` 判。非试验模式下 `labVerdict()` 第一条就放行。
@@ -1546,7 +1630,7 @@ function cmdStatus() {
       + (last === undefined ? '  还没保过' : `  上次命中 ${(last.hitRate * 100).toFixed(1)}%  第${last.touch}次  花费 ${yuan(last.cost)}`)
       + `  间隔 ${Math.round(intervalMsOf(state, policy) / 60000)} 分`)
   }
-  const totalCost = Object.values(state.ledger).flat().reduce((sum, e) => sum + (e.cost ?? 0), 0)
+  const totalCost = spendAtCurrentPrices(Object.values(state.ledger).flat(), state.settings).cost
   const totalTouches = Object.values(state.ledger).flat().length
   console.log(`  累计        ${totalTouches} 次  共 ${yuan(totalCost)}`)
 }

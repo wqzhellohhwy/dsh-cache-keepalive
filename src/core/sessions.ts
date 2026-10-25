@@ -72,6 +72,11 @@ export interface SessionRow {
    * 自己要的（该保）；只有 origin 显式为 subagent 的才算子代理（命短、上下文碎，保了赔钱）。
    */
   origin: string
+  /**
+   * 父会话 id（仅子代理会话有；日志头 `parentSession`）。
+   * 用于「父会话在保温才保子代理」——空串 = 拿不到父会话，调用方应视为在保温（宁可多保）。
+   */
+  parentSession: string
 }
 
 export interface ListOptions {
@@ -89,6 +94,21 @@ export interface ListOptions {
  * @param buf 文件内容（可以是头部截断）。
  * @returns 解出的文本，以及实际解成功的帧数。
  */
+
+/**
+ * 子代理标题（清洗 / 无用判定 / 从投影与日志取全名）。
+ *
+ * 实现放在 core/subagent-title.ts（会话扫描模块已经够大），这里只做 re-export，
+ * 让调用方仍然从 sessions.ts 取 —— 保持既有导入路径不变。
+ */
+export {
+  cleanSubagentTitle,
+  findSessionLogFile,
+  isUselessTitle,
+  readSubagentTitle,
+  readTeammateNameFromLog,
+} from './subagent-title.ts'
+
 export function decodeMultiFrame(buf: Buffer): { text: string; frames: number } {
   const marks = [0]
   for (let i = buf.indexOf(MAGIC, 1); i >= 0; i = buf.indexOf(MAGIC, i + 4)) marks.push(i)
@@ -442,6 +462,8 @@ interface ParsedMeta {
   title: string
   titleSource: TitleSource
   origin: string
+  /** 父会话 id（仅子代理有；日志头 \parentSession\）。 */
+  parentSession: string
 }
 
 function parseMeta(text: string): ParsedMeta {
@@ -451,17 +473,19 @@ function parseMeta(text: string): ParsedMeta {
   let title = ''
   let titleSource: TitleSource = 'none'
   let origin = ''
+  let parentSession = ''
   const lines = text.split('\n')
   for (const line of lines) {
     if (line === '') continue
     // 标题事件可能在任意位置；只解析含关键字的行，避免全量 JSON.parse 的开销
     if (line.startsWith('{"type":"session",')) {
       try {
-        const o = JSON.parse(line) as { id?: string; cwd?: string; createdAt?: number; origin?: string }
+        const o = JSON.parse(line) as { id?: string; cwd?: string; createdAt?: number; origin?: string; parentSession?: string }
         id = typeof o.id === 'string' ? o.id : id
         cwd = typeof o.cwd === 'string' ? o.cwd : cwd
         createdAt = typeof o.createdAt === 'number' ? o.createdAt : createdAt
         origin = typeof o.origin === 'string' ? o.origin : origin
+        parentSession = typeof o.parentSession === 'string' ? o.parentSession : parentSession
       } catch { /* 忽略坏行 */ }
       continue
     }
@@ -477,7 +501,7 @@ function parseMeta(text: string): ParsedMeta {
       }
     } catch { /* 忽略坏行 */ }
   }
-  return { id, cwd, createdAt, title, titleSource, origin }
+  return { id, cwd, createdAt, title, titleSource, origin, parentSession }
 }
 
 /** 读 `storages/workspace.json` 里的归档/置顶集合。 */
@@ -556,7 +580,7 @@ export function listSessions(dshHome: string, options: ListOptions = {}): Sessio
           text = decodeMultiFrame(readHeadBytes(logFile, headBytes, st.size)).text
         } catch { /* 读不出来就只留文件信息 */ }
         meta = text === ''
-          ? { id: entry.name, cwd: '', createdAt: 0, title: '', titleSource: 'none' as TitleSource, origin: '' }
+          ? { id: entry.name, cwd: '', createdAt: 0, title: '', titleSource: 'none' as TitleSource, origin: '', parentSession: '' }
           : parseMeta(text)
         /**
          * **阶梯补读**（只在完全没有标题时）：64KB 拿不到标题 → 补读 256KB。
@@ -597,6 +621,7 @@ export function listSessions(dshHome: string, options: ListOptions = {}): Sessio
         archived: archived.has(id),
         pinned: pinned.has(id),
         origin: meta.origin,
+        parentSession: meta.parentSession,
       })
     }
   }

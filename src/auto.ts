@@ -36,6 +36,14 @@ export interface AutoSettings {
    * 给它续缓存的钱基本收不回来；而且它们的数量可能远超主会话，会把自动名额吃光。
    */
   allowSubagent: boolean
+  /**
+   * **子代理独立名额**（0 = 不保）。
+   *
+   * - `undefined` = 旧调用方（没传这个字段）→ 保持旧行为：`allowSubagent` 开着就不限名额纳入；
+   * - `<= 0` = 明确不保（即使 `allowSubagent` 开着）；
+   * - `> 0` = 子代理池大小，与 `count`（普通池）**互不占位**。
+   */
+  countSubagent?: number
 }
 
 export interface Candidate {
@@ -72,6 +80,13 @@ export interface Candidate {
   archived?: boolean
   /** 是否是子代理会话（日志头 `origin === 'subagent'`）。 */
   isSubagent?: boolean
+  /**
+   * **父会话是否在保温中**。
+   *
+   * - `false` = 父会话明确不在保温（熔断 / 门禁拦）⇒ 子代理也停；
+   * - `true` 或 `undefined` = 在保温 / 拿不到父会话信息 ⇒ 照常参与（宁可多保）。
+   */
+  parentWarm?: boolean
 }
 
 export type CandidateReason =
@@ -87,6 +102,10 @@ export type CandidateReason =
   | 'untitled'
   /** 子代理会话 —— 默认不纳入自动托管（见 `AutoSettings.allowSubagent`）。 */
   | 'subagent'
+  /** 子代理会话：父会话不在保温 ⇒ 跟着停（`Candidate.parentWarm === false`）。 */
+  | 'subagent-parent-idle'
+  /** 子代理池名额不够。 */
+  | 'over-quota-subagent'
   /** 本插件没见过它活动，不知道热不热。 */
   | 'never-seen'
   /** 前面排满了，名额不够。 */
@@ -121,7 +140,8 @@ export function pickAutoCandidates(
     return [...judged.values()]
   }
 
-  const eligible: Candidate[] = []
+  const normals: Candidate[] = []
+  const subs: Candidate[] = []
   for (const c of candidates) {
     const d = judged.get(c.id)!
     /**
@@ -141,11 +161,14 @@ export function pickAutoCandidates(
       continue
     }
     /**
-     * **子代理关掉开关时，先于一切「不归自动管」的理由报 `subagent`**：
-     * `mode='on'` 的子代理走 tick 的强制路径（不经本函数），自动池里这条只是「自动策略不接管」，
-     * 报 `manual` 会让人以为是用户手动指定的结果。
+     * **子代理名额关闭时提前拦**（先于 `manual`）：`mode='on'` 的子代理走 tick 的强制路径
+     * （不经本函数），自动池里报 `manual` 会让人以为是用户手动指定的结果。
+     *
+     * 两段式：这里只判「名额关没关」；父会话状态与分池放在资格判定之后（见下方 `subs.push`）。
      */
-    if (c.isSubagent === true && settings.allowSubagent !== true) {
+    if (c.isSubagent === true
+      && (settings.allowSubagent !== true
+        || (settings.countSubagent !== undefined && settings.countSubagent <= 0))) {
       d.reason = 'subagent'
       continue
     }
@@ -171,17 +194,49 @@ export function pickAutoCandidates(
      * 过去这里还重复判一遍 `now - lastRefreshAt > maxIdleHours`，判据与门禁完全相同 →
      * 永远走不到，成了死码（`too-idle`）。删掉，只留门禁那一份。
      */
-    eligible.push(c)
+    /**
+     * **分池**（资格判定之后）：子代理进子代理池，其余进普通池。
+     * 父会话明确不在保温 → 子代理跟着停（`undefined` = 拿不到父会话，宁可多保）。
+     */
+    if (c.isSubagent === true) {
+      if (c.parentWarm === false) {
+        d.reason = 'subagent-parent-idle'
+        continue
+      }
+      subs.push(c)
+      continue
+    }
+    normals.push(c)
   }
 
-  eligible.sort((a, b) => b.lastActiveAt - a.lastActiveAt) // 最近活跃的优先（不许改成按 lastRefreshAt）
-  eligible.forEach((c, index) => {
+  /**
+   * **两个池互不占位**：普通池按 `count`，子代理池按 `countSubagent`。
+   * 名次（`rank`）跨池连续 —— 子代理排在普通会话之后，面板上不会出现两个「第 1 名」。
+   */
+  const byActive = (a: Candidate, b: Candidate) => b.lastActiveAt - a.lastActiveAt // 最近活跃优先
+  normals.sort(byActive)
+  subs.sort(byActive)
+  let rank = 1
+  normals.forEach((c, index) => {
     const d = judged.get(c.id)!
     if (index < settings.count) {
       d.picked = true
-      d.rank = index + 1
+      d.rank = rank
+      rank += 1
     } else {
       d.reason = 'over-quota'
+    }
+  })
+  /** `undefined` = 旧调用方，子代理不限名额（保持旧行为）。 */
+  const subQuota = settings.countSubagent === undefined ? Number.POSITIVE_INFINITY : settings.countSubagent
+  subs.forEach((c, index) => {
+    const d = judged.get(c.id)!
+    if (index < subQuota) {
+      d.picked = true
+      d.rank = rank
+      rank += 1
+    } else {
+      d.reason = 'over-quota-subagent'
     }
   })
   return [...judged.values()]

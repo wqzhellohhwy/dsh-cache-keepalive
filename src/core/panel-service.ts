@@ -68,7 +68,7 @@ import {
   untripSession,
   statePath, type LedgerEntry, type State,
 } from '../store.ts'
-import { buildGateInput } from './gate-input.ts'
+import { buildGateInput, effectiveLimitsOf } from './gate-input.ts'
 import { modelChangedOf } from './model-switch.ts'
 import { applySettingsPatch, labRestoreBackup, labSnapshotOf } from './settings.ts'
 import { buildLedgerEntry, spendAtCurrentPrices } from './ledger-entry.ts'
@@ -462,6 +462,8 @@ export function createPanelService(options: PanelServiceOptions): PanelService {
         },
         /** **展示**花费按**当前价格**重算（与插件侧 snapshot 同口径）；预算/熔断仍用存储 `e.cost`。 */
         spend: spendAtCurrentPrices(led, state.settings).cost,
+        /** 预算口径：真实花过的钱（改价不影响）。 */
+        ledgerSpend: led.reduce((s, e) => s + e.cost, 0),
         cycle: cycleOf(state, meta.id),
         /** 本周期花费（**账本口径**：真实花过的钱，改价不影响 —— 判定方在用，别改）。 */
         cycleSpend: cycleSpendOf(state, meta.id),
@@ -479,7 +481,24 @@ export function createPanelService(options: PanelServiceOptions): PanelService {
          * 生效间隔（秒）：下限 **1 秒**（试验模式 30 秒不能被显示成 60），
          * `Number(x) || 60` 只兜脏值（0/NaN → 60），与 `core/gate-input.ts:intervalOf()` 同口径。
          */
-        intervalSeconds: Math.round(Math.max(1, Number(policy.intervalSeconds ?? state.settings.intervalSeconds) || 60)),
+        /**
+         * **生效间隔（秒）**：与门禁/自动候选**同一套** per-model 覆盖（`effectiveLimitsOf`）。
+         *
+         * ⚠️ 不能只读 `policy.intervalSeconds ?? settings.intervalSeconds`：那条路径完全不吃
+         * `settings.modelOverrides` —— 用户按模型填了「间隔 10800 秒」，列表仍显示全局 4 小时，
+         * 用户会以为没生效。拿不到 provider/model（或该模型被禁用 interval）时回落会话/全局值。
+         */
+        intervalSeconds: (() => {
+          const m = readSessionModel(meta.logFile)
+          /** model 的兜底：`readSessionModel` 读日志头常拿不到，但账本末条一直记着 `model`。 */
+          const lastLed = led[led.length - 1]
+          const model = m?.model ?? lastLed?.model
+          const lim = effectiveLimitsOf(state.settings, m?.provider, model)
+          if (model === undefined || lim.intervalMs <= 0) {
+            return Math.round(Math.max(1, Number(policy.intervalSeconds ?? state.settings.intervalSeconds) || 60))
+          }
+          return Math.round(Math.max(1, lim.intervalMs / 1000))
+        })(),
         maxTouches: policy.maxTouches ?? state.settings.maxTouches,
         maxTouches: policy.maxTouches ?? state.settings.maxTouches,
       }

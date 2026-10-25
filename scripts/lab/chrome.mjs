@@ -380,27 +380,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -415,27 +395,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -450,27 +410,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -485,27 +425,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -520,27 +440,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -555,27 +455,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -590,27 +470,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -625,27 +485,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -660,27 +500,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -695,27 +515,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -730,27 +530,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -765,27 +545,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -800,27 +560,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -835,27 +575,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -870,27 +590,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -905,27 +605,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -940,27 +620,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -975,27 +635,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1010,27 +650,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1045,27 +665,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1080,27 +680,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1115,27 +695,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1150,27 +710,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1185,27 +725,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1220,27 +740,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1255,27 +755,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1290,27 +770,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1325,27 +785,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1360,27 +800,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1395,27 +815,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1430,27 +830,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1465,27 +845,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1500,27 +860,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1535,27 +875,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1570,27 +890,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1605,27 +905,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1640,27 +920,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1675,27 +935,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1710,27 +950,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1745,27 +965,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1780,27 +980,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1815,27 +995,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1850,27 +1010,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1885,27 +1025,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1920,27 +1040,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1955,27 +1055,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -1990,27 +1070,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -2025,27 +1085,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -2060,27 +1100,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -2095,27 +1115,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -2130,27 +1130,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -2165,27 +1145,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -2200,27 +1160,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 /**
  * 按 `--user-data-dir=<ud>` 精确查出所有 chrome 进程并逐个杀掉，返回杀到的数量。
@@ -2235,27 +1175,7 @@ export { killByUserDataDir }
  *
  * 只匹配本 ud 的绝对路径，绝不会碰到用户自己的浏览器窗口。
  */
-function killByUserDataDir(ud) {
-  if (!ud) return 0
-  let pids = []
-  try {
-    // PowerShell 单引号字符串里，单引号要双写
-    const esc = ud.replace(/'/g, "''")
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | `
-      + `Where-Object { $_.CommandLine -like '*${esc}*' } | ForEach-Object { $_.ProcessId }`,
-    ], { encoding: 'utf8' })
-    pids = out.split(/\s+/).filter(Boolean)
-  } catch { return 0 }
-  if (!pids.length) return 0
-  // 逐个杀，不带 /T：这些 pid 本来就是同一棵树的成员，树关系已断时逐个更可靠
-  const args = []
-  for (const p of pids) args.push('/PID', p)
-  try { execFileSync('taskkill.exe', [...args, '/F'], { stdio: 'ignore' }) } catch {}
-  return pids.length
-}
 
-export { killByUserDataDir }
 
 export async function close(handle) {
   if (!handle) return

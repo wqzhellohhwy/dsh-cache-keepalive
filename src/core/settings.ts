@@ -79,6 +79,8 @@ export function applySettingsPatch(
     next[k] = bag3
   }
   setNum('autoCount', 0)
+  /** 子代理独立名额（负数夹到 0；非数字丢弃；数字字符串照收）。 */
+  setNum('autoCountSubagent', 0)
   setNum('intervalSeconds', 60)
   /** 闲置上限（小时）：门禁与自动候选共用。下限 0.5 小时。 */
   setNum('idleLimitHours', 0.5)

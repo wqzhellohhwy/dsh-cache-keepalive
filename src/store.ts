@@ -50,6 +50,13 @@ export interface Settings {
   /** 自动保几条（按最近活动排序）。 */
   autoCount: number
   /**
+   * **子代理独立名额**（0 = 不保子代理，默认）。
+   *
+   * 与 `autoCount` 是两个池、互不占位：普通会话占 `autoCount`，子代理占这个名额。
+   * 只有 `autoAllowSubagent === true`（总开关）且本值 > 0 时才真的保子代理。
+   */
+  autoCountSubagent: number
+  /**
    * 是否把**子代理会话**也纳入自动候选。默认 false。
    * 见 `auto.AutoSettings.allowSubagent` 的取舍说明。
    */
@@ -198,6 +205,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   autoEnabled: true,
   autoCount: 2,
+  autoCountSubagent: 0,
   autoAllowSubagent: false,
   intervalSeconds: 4 * 3600,
   subagentIntervalSeconds: 120,
@@ -348,10 +356,85 @@ export interface State {
    * 按 `at >= settings.labStartedAt` 过滤，天然按试验轮次隔离（换轮后旧的自动不计）。
    */
   labPending?: { id: string; sessionId: string; worst: number; at: number; status: 'inflight' | 'unknown' }[]
+  /**
+   * **跨进程「正在保温」标记**：会话 id → { at, by }。
+   *
+   * 为什么必须落盘：插件（tick / 面板 / 工具）与独立 CLI 是两个进程，各自持有一份内存 state，
+   * 光有内存锁挡不住「同一时刻两个入口各发一次」—— 实测同一会话 7~16 秒内被保两次，
+   * 第二次命中 2~4%（漏 47~79 万 token ≈ 50 次正常保温的钱）。
+   * 过期时间见 `INFLIGHT_TTL_MS`；处理见 `tryClaimInflight` / `releaseInflight`。
+   */
+  inflight?: Record<string, InflightMark>
 }
 
 /** 每会话账本最多保留多少条。 */
 const LEDGER_CAP = 200
+
+/** 一条「正在保温」标记。 */
+export interface InflightMark {
+  /** 抢占时刻（毫秒）。 */
+  at: number
+  /** 谁抢的：`cli` = CLI 守护循环/命令行，`panel` = 面板点击，`tool` = agent 工具，`auto` = tick。 */
+  by: string
+}
+
+/**
+ * 在途标记多久算过期（毫秒）。
+ *
+ * **60 秒**的依据：实测最慢的一次保温 `ms=29569`（约 30 秒），60 秒给 2 倍余量。
+ * 太短 → 正常慢请求被误判过期，第二个入口闯进来（互斥失效）；
+ * 太长 → 进程被强杀后残留标记会长时间堵住这条会话（用户点「保温」没反应）。
+ */
+export const INFLIGHT_TTL_MS = 60_000
+
+/**
+ * 本进程**最后一次**动过某会话在途标记的时刻（claim / release 都记）。
+ *
+ * 用途：`mergeForeign` 写盘时会把磁盘上的标记并回来 —— 磁盘那份可能正是本进程上一次写的旧快照，
+ * 把刚 `releaseInflight()` 掉的标记搬回来就等于没释放（实测会永久堵住）。判据用**时刻**而不是
+ * 「碰过没有」：磁盘标记比自己最后一次操作还新 ⇒ 那是别人写的，必须并回；更旧 ⇒ 是自己写剩的，跳过。
+ */
+const LAST_TOUCH = new Map<string, number>()
+
+function markHolding(id: string): void {
+  LAST_TOUCH.set(id, Date.now())
+}
+
+/**
+ * 抢「正在保温」标记。**必须在 `withStateLock` 的临界区内、且用锁内重新 `loadState()` 的
+ * 那份 state 调用** —— 用锁外的旧快照判等于没判（两个进程都读到「无标记」就都放行）。
+ *
+ * @returns true = 抢到（可以发请求）；false = 别人正在保且未过期（本次跳过、不花钱）
+ */
+export function tryClaimInflight(state: State, id: string, by: string, now = Date.now()): boolean {
+  if (state.inflight === undefined) state.inflight = {}
+  const cur = state.inflight[id]
+  if (cur !== undefined && now - cur.at < INFLIGHT_TTL_MS) return false
+  state.inflight[id] = { at: now, by }
+  markHolding(id)
+  return true
+}
+
+/**
+ * 释放在途标记。**记账后 / 失败后 / 抛错后都要调**（调用方用 `try/finally`），
+ * 否则这条会话会被堵到 `INFLIGHT_TTL_MS` 过期为止。
+ */
+export function releaseInflight(state: State, id: string): void {
+  /** 先记 HOLDING 再删：否则紧接着那次 `saveState` 会把磁盘上的旧标记搬回来（= 根本没释放）。 */
+  markHolding(id)
+  if (state.inflight === undefined) return
+  delete state.inflight[id]
+}
+
+/** 清掉过期标记（写盘时顺手做，避免 state.json 越攒越大）。返回清掉几个。 */
+export function sweepInflight(state: State, now = Date.now()): number {
+  if (state.inflight === undefined) return 0
+  let n = 0
+  for (const [id, m] of Object.entries(state.inflight)) {
+    if (now - m.at >= INFLIGHT_TTL_MS) { delete state.inflight[id]; n += 1 }
+  }
+  return n
+}
 
 export function statePath(): string {
   const dshHome = process.env.DSH_HOME || join(homedir(), '.dsh')
@@ -403,7 +486,7 @@ function numMap(v: unknown): Record<string, number> {
  * （前两者的语义已被 `idleLimitHours` 一条合并；`autoMaxIdleHours` 已无消费者，自动候选读同一个 `idleLimitHours`）。
  * 留着只会被再次写回磁盘误导下次。
  */
-function normalizeSettings(raw: unknown): Settings {
+export function normalizeSettings(raw: unknown): Settings {
   const src = raw !== null && typeof raw === 'object' ? raw as Record<string, unknown> : {}
   const merged = { ...DEFAULT_SETTINGS, ...src } as Settings & Record<string, unknown>
   delete merged.warmWindowSeconds
@@ -518,6 +601,28 @@ export function loadState(file = statePath()): State {
             && (o.status === 'inflight' || o.status === 'unknown')
         })
         : [],
+      /**
+       * **跨进程在途标记必须解析回来** —— 漏了这一行整套互斥就是假的：
+       * 抢标记时写进去了，另一个进程读回来却是 `undefined` → 它照样抢得到。
+       * 只收 `{ at: number, by: string }` 结构完整的条目，脏值丢弃。
+       */
+      inflight: (() => {
+        const src = raw.inflight
+        if (src === null || typeof src !== 'object' || Array.isArray(src)) return {}
+        const out: Record<string, InflightMark> = {}
+        const now = Date.now()
+        for (const [id, v] of Object.entries(src as Record<string, unknown>)) {
+          if (v === null || typeof v !== 'object') continue
+          const o = v as Record<string, unknown>
+          /** 结构不全（缺 at / 缺 by / at 不是有限数）→ 丢：脏数据不能变成「永久占着」。 */
+          if (typeof o.at !== 'number' || !Number.isFinite(o.at)) continue
+          if (typeof o.by !== 'string') continue
+          /** 过期的直接丢（崩溃残留自愈）：读进来就当它不存在，调用方不必自己清。 */
+          if (now - o.at >= INFLIGHT_TTL_MS) continue
+          out[id] = { at: o.at, by: o.by }
+        }
+        return out
+      })(),
     }
   } catch {
     return { version: 1, settings: { ...DEFAULT_SETTINGS }, sessions: {}, ledger: {}, pinnedSessions: [] }
@@ -722,6 +827,22 @@ function mergeForeign(state: State, file: string): void {
   }
   if (state.pinnedSessions === undefined && disk.pinnedSessions !== undefined) {
     state.pinnedSessions = disk.pinnedSessions
+  }
+  /**
+   * 在途标记：并回磁盘那份 —— 别人正在保这条会话时，本进程一次无关的写盘
+   * 不能把它的标记整份覆盖抹掉（否则跨进程互斥时好时坏）。
+   * 同 id 取更晚的；**本进程刚碰过的（HOLDING）跳过** —— 磁盘那份可能是自己上一次写的旧快照，
+   * 搬回来会把刚释放掉的标记复活。
+   */
+  if (disk.inflight !== undefined) {
+    const mine = state.inflight ?? (state.inflight = {})
+    for (const [id, m] of Object.entries(disk.inflight)) {
+      const touched = LAST_TOUCH.get(id)
+      /** 磁盘标记比本进程最后一次操作还旧 → 是自己写剩的（可能是刚释放掉的），不许复活。 */
+      if (touched !== undefined && m.at <= touched) continue
+      const cur = mine[id]
+      if (cur === undefined || cur.at < m.at) mine[id] = m
+    }
   }
   /**
    * 最后统一压到上限 —— 不只压在合并路径上。

@@ -46,12 +46,21 @@ export interface CandidateRow {
    * `live` → `ping(agent)`（内存，零读盘，快）；`!live` → 离线装配 `warmOffline()`（慢但全能）。
    */
   live?: boolean
+  /**
+   * **父会话 id**（仅子代理会话有；来自日志头的 `parentSession`）。
+   *
+   * 用来算 `parentWarm`：父会话在保温才保子代理（父熔断/被门禁拦时子代理跟着停）。
+   * 空串/缺省 = 拿不到父会话 ⇒ 视为在保温（宁可多保）。
+   */
+  parentId?: string
 }
 
 /** 自动候选的旋钮（与 `AutoSettings` 同形；`maxIdleHours` 取 `settings.idleLimitHours`）。 */
 export interface CandidatesAutoSettings {
   enabled: boolean
   count: number
+  /** 子代理独立名额（与 `count` 互不占位）；缺省 = 旧调用方，子代理不限名额。 */
+  countSubagent?: number
   maxIdleHours: number
   allowSubagent: boolean
 }
@@ -85,9 +94,9 @@ export function decideCandidates(
       rewritten: row.rewritten !== undefined,
       rewriteDetail: row.rewritten?.detail,
       /**
-       * 子代理走**专用短间隔且不吃网页版延后**（见 `gate.decideWarm`）。
-       * 不传这一位，子代理就按主会话的 4 小时间隔判 —— 它们活不到那个点，
-       * 于是「子代理也算」开关看着像失效（进了候选但门禁恒 `too-soon`）。
+       * **子代理与主会话同源间隔**（用户 2026-10-25 口径：「别给子代理单独设短间隔」）。
+       * 这个位只用于门禁的文案/后续扩展，**不再改变间隔**（`decideWarm` 里 `effInterval`
+       * 恒等于 `intervalMs`）。
        */
       isSubagent: row.origin === 'subagent',
       /**
@@ -108,6 +117,22 @@ export function decideCandidates(
       gateOk: gateAccepts(gate),
     }
   })
+  /**
+   * **父会话是否在保温**：同批里能找到父会话就按它的门禁结论算
+   * （放行 / fresh / too-soon 都算「在保温」，被熔断或门禁拦就不算）。
+   * 父会话不在本批（多半已结束）→ 不填 `parentWarm`，`pickAutoCandidates` 视为未知、宁可多保。
+   */
+  const warmOf = new Map<string, boolean>()
+  for (const c of pool) warmOf.set(c.id, c.gateOk === true)
+  const parentOf = new Map<string, string | undefined>()
+  for (const row of rows) parentOf.set(row.id, row.parentId)
+  for (const c of pool) {
+    if (c.isSubagent !== true) continue
+    const pid = parentOf.get(c.id)
+    if (typeof pid !== 'string' || pid === '') continue
+    const warm = warmOf.get(pid)
+    if (warm !== undefined) (c as { parentWarm?: boolean }).parentWarm = warm
+  }
   return new Map(pickAutoCandidates(pool, auto, now).map((d) => [d.id, d]))
 }
 

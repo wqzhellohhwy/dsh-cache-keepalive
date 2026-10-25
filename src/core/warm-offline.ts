@@ -20,6 +20,8 @@ import { join } from 'node:path'
 import { assembleSession, refuseForImages, type AssembleResult } from './assemble.ts'
 import { serializeForApi } from './wire.ts'
 import { serializeForOpenAI } from './wire-openai.ts'
+import { serializeForResponses } from './wire-responses.ts'
+import { apiKindOf, type ApiKind } from '../api-kind.ts'
 import { loadProviders } from './providers.ts'
 import { currentReasoningEffortOf, instructionRoleOf, maxTokensFieldOf, providerMetaOf, thinkingParamsOf } from './provider-meta.ts'
 import { readAttachment } from './attachments.ts'
@@ -188,6 +190,164 @@ export function wireShapeOf(plan: AssembleResult, dshHome?: string): {
 }
 
 /**
+ * **把三种协议的 usage 映射到插件内部同一口径**。
+ *
+ * ```
+ * 内部口径：inputTokens = 未命中、cacheReadTokens = 命中、cacheWriteTokens = 新建缓存、outputTokens = 输出
+ * ```
+ *
+ * ⚠️ **API 用 snake_case，DSH 内部用 camelCase** —— 直接当 camelCase 读会全是 0。
+ *
+ * ## 三种协议的关键差别：`input_tokens` 到底是不是总长
+ *
+ * | 协议 | 未命中 | 命中 | 总长口径 |
+ * |---|---|---|---|
+ * | Anthropic Messages | `input_tokens` **就是未命中** | `cache_read_input_tokens` | input+read+write |
+ * | OpenAI Chat Completions | `prompt_tokens - cached` | `prompt_tokens_details.cached_tokens` 或 `prompt_cache_hit_tokens` | `prompt_tokens` 是**总长** |
+ * | OpenAI Responses | `input_tokens - cached` | `input_tokens_details.cached_tokens` | `input_tokens` 是**总长** |
+ *
+ * 早先一律当总长处理 → `input_tokens=194 / read=207360` 被算成 0 未命中、命中率 100%（真实 99.9%）。
+ *
+ * @param raw 响应里的 `usage` 对象
+ */
+export function parseUsage(raw: Record<string, unknown> | undefined): OfflineUsage {
+  const u = (raw ?? {}) as Record<string, unknown>
+  const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+  const obj = (v: unknown): Record<string, unknown> | undefined =>
+    (v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : undefined)
+
+  const read = num(u['cache_read_input_tokens'])
+  const hit = num(u['prompt_cache_hit_tokens'])
+  const write = num(u['cache_creation_input_tokens'])
+  const chatCached = num(obj(u['prompt_tokens_details'])?.['cached_tokens'])
+  const respCached = num(obj(u['input_tokens_details'])?.['cached_tokens'])
+  const cached = read ?? hit ?? chatCached ?? respCached ?? 0
+
+  /**
+   * Anthropic 的 `input_tokens` 是**未命中**，OpenAI 两家的都是**总长**。
+   *
+   * ⚠️ 判据**不能**用「有没有 anthropic 专属字段」单独决定：Responses 只有
+   * `input_tokens` + `input_tokens_details`，没有 `cache_read_input_tokens`，
+   * 那样会把它误判成 Anthropic，进而把命中率算成 0。
+   *
+   * 正确判据：
+   *  - 出现 `prompt_tokens` 或 `*_tokens_details` ⇒ 一定是 OpenAI 系（总长口径）
+   *  - 否则出现 `cache_read_input_tokens` / `cache_creation_input_tokens` ⇒ Anthropic
+   */
+  const openAiStyle = num(u['prompt_tokens']) !== undefined
+    || obj(u['prompt_tokens_details']) !== undefined
+    || obj(u['input_tokens_details']) !== undefined
+  const isAnthropicStyle = !openAiStyle && (read !== undefined || write !== undefined)
+  const total = isAnthropicStyle
+    ? (num(u['input_tokens']) ?? 0) + cached + (write ?? 0)
+    : (num(u['input_tokens']) ?? num(u['prompt_tokens']) ?? 0)
+
+  const usage: OfflineUsage = {
+    inputTokens: isAnthropicStyle
+      ? (num(u['input_tokens']) ?? 0)
+      : Math.max(0, total - cached - (write ?? 0)),
+    outputTokens: num(u['output_tokens']) ?? num(u['completion_tokens']) ?? 0,
+    cacheReadTokens: cached,
+    cacheWriteTokens: write ?? 0,
+  }
+  usage.cacheKnown = read !== undefined || hit !== undefined || chatCached !== undefined || respCached !== undefined
+  usage.totalTokens = (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.outputTokens ?? 0)
+  return usage
+}
+
+/** `buildRequest` 的入参。 */
+export interface BuildRequestOptions {
+  messages: Parameters<typeof serializeForApi>[0]
+  model?: string
+  system?: unknown
+  tools: readonly unknown[]
+  maxTokens: number
+  reasoningEffort?: string
+  wireShape: ReturnType<typeof wireShapeOf>
+  /** 端点根（不含路径）。 */
+  baseURL: string
+  /** 已解析的 key。 */
+  apiKey: string
+  resolveImage?: Parameters<typeof serializeForApi>[1]['resolveImage']
+}
+
+/** 一条待发的 HTTP 请求（纯数据，便于断言）。 */
+export interface BuiltRequest {
+  url: string
+  headers: Record<string, string>
+  body: string
+}
+
+/**
+ * **按协议构造保温请求** —— 纯函数、不联网。
+ *
+ * 三条分支的差别全部收敛在这里，调用方只看 `apiKind`：
+ *
+ * | apiKind | URL 后缀 | 鉴权头 | body 序列化器 |
+ * |---|---|---|---|
+ * | `openai-completions` | `/chat/completions` | `authorization: Bearer` | `serializeForOpenAI` |
+ * | `openai-responses` | `/responses` | `authorization: Bearer` | `serializeForResponses` |
+ * | `anthropic-messages` | `/v1/messages` | `x-api-key` + `anthropic-version` | `serializeForApi` |
+ *
+ * 三种都发**非流式**（`stream:false`）：离线只要 usage，拿完整 JSON 更简单。
+ *
+ * @param kind 协议
+ * @param o 入参
+ */
+export function buildRequest(kind: ApiKind, o: BuildRequestOptions): BuiltRequest {
+  const root = o.baseURL.replace(/\/+$/u, '')
+  const json = 'application/json'
+  if (kind === 'openai-responses') {
+    const body = serializeForResponses(o.messages, {
+      model: o.model ?? '',
+      maxTokens: o.maxTokens,
+      ...(o.system === undefined ? {} : { system: String(o.system) }),
+      ...(o.tools.length === 0 ? {} : { tools: [...o.tools] }),
+      ...(o.reasoningEffort === undefined ? {} : { reasoningEffort: o.reasoningEffort }),
+      ...(o.resolveImage === undefined ? {} : { resolveImage: o.resolveImage }),
+    })
+    body.stream = false
+    return {
+      url: root + '/responses',
+      headers: { 'content-type': json, authorization: 'Bearer ' + o.apiKey },
+      body: JSON.stringify(body),
+    }
+  }
+  if (kind === 'openai-completions') {
+    const body = serializeForOpenAI(o.messages, {
+      model: o.model ?? '',
+      maxTokens: o.maxTokens,
+      ...(o.system === undefined ? {} : { system: String(o.system) }),
+      ...(o.tools.length === 0 ? {} : { tools: [...o.tools] }),
+      ...(o.resolveImage === undefined ? {} : { resolveImage: o.resolveImage }),
+      ...o.wireShape,
+    })
+    body.stream = false
+    delete body.stream_options
+    return {
+      url: root + '/chat/completions',
+      headers: { 'content-type': json, authorization: 'Bearer ' + o.apiKey },
+      body: JSON.stringify(body),
+    }
+  }
+  const tools = [...o.tools] as { name?: string }[]
+  const body = serializeForApi(o.messages, {
+    model: o.model ?? 'deepseek-flash',
+    maxTokens: o.maxTokens,
+    ...(o.system === undefined ? {} : { system: String(o.system) }),
+    ...(tools.length === 0 ? {} : { tools, declaredNames: new Set(tools.map((t) => String(t.name ?? ''))) }),
+    ...(o.reasoningEffort === undefined ? {} : { reasoningEffort: o.reasoningEffort }),
+    ...(o.resolveImage === undefined ? {} : { resolveImage: o.resolveImage }),
+  })
+  body.stream = false
+  return {
+    url: root + '/v1/messages',
+    headers: { 'content-type': json, 'x-api-key': o.apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify(body),
+  }
+}
+
+/**
  * 掉一次真实保温请求（离线装配 + 直连）。
  *
  * @param options 参数
@@ -307,50 +467,43 @@ export async function warmOffline(options: OfflineWarmOptions): Promise<OfflineW
   let res: Response
   /** 真实请求的形状（role / thinking / 输出上限键名）——**全部由 `provider-meta` 判定，不硬编码**。 */
   const wireShape = wireShapeOf(plan, options.dshHome)
+  /**
+   * **协议判定**：按 provider 配置里声明的 `api` 字段走，不再用「第三方 vs 官方」二分。
+   *
+   * 二分把两件事混在一起了 —— 同一家供应商可以只开 Anthropic 端点
+   * （`api.deepseek.com/anthropic`），第三方也可以开 Responses 端点。
+   */
+  const apiHint = third?.api
+  const baseURLOf = useThird !== undefined
+    ? useThird.baseURL
+    : (options.baseUrl ?? process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL)
+  const apiKind = apiKindOf(
+    typeof providerName === 'string' ? providerName : 'deepseek',
+    baseURLOf,
+    apiHint,
+  )
+  /**
+   * **按协议构造真正的请求**（URL + headers + body）—— 纯函数、不联网，便于用桩 fetch 断言。
+   */
+  const req = buildRequest(apiKind, {
+    messages: plan.messages,
+    model: plan.config?.model,
+    system: plan.system,
+    tools: plan.tools,
+    maxTokens: options.maxTokens ?? WARM_MAX_TOKENS,
+    reasoningEffort: plan.config?.reasoningEffort as string | undefined,
+    wireShape,
+    baseURL: baseURLOf,
+    apiKey: String(useThird?.apiKey ?? apiKey ?? ''),
+    resolveImage,
+  })
   try {
-    if (useThird !== undefined) {
-      /** 第三方：OpenAI Chat Completions，非流式（拿完整 JSON 更简单）。 */
-      const body = serializeForOpenAI(plan.messages, {
-        model: plan.config?.model ?? '',
-        maxTokens: options.maxTokens ?? WARM_MAX_TOKENS,
-        ...(plan.system === undefined ? {} : { system: plan.system }),
-        ...(plan.tools.length === 0 ? {} : { tools: plan.tools }),
-        resolveImage,
-        ...wireShape,
-      })
-      body.stream = false
-      delete body.stream_options
-      res = await fetch(useThird.baseURL.replace(/\/+$/u, '') + '/chat/completions', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: 'Bearer ' + String(useThird.apiKey),
-        },
-        body: JSON.stringify(body),
-        signal: reqSignal,
-      })
-    } else {
-      const body = serializeForApi(plan.messages, {
-        model: plan.config?.model ?? 'deepseek-flash',
-        maxTokens: options.maxTokens ?? WARM_MAX_TOKENS,
-        ...(plan.system === undefined ? {} : { system: plan.system }),
-        ...(plan.tools.length === 0 ? {} : { tools: plan.tools, declaredNames: new Set(plan.tools.map((t) => t.name)) }),
-        ...(plan.config?.reasoningEffort === undefined ? {} : { reasoningEffort: plan.config.reasoningEffort as string }),
-        resolveImage,
-      })
-      body.stream = false // 非流式：拿完整 JSON 更简单
-      const baseUrl = options.baseUrl ?? process.env.DEEPSEEK_BASE_URL ?? DEFAULT_BASE_URL
-      res = await fetch(baseUrl + '/v1/messages', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': String(apiKey ?? ''),
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify(body),
-        signal: reqSignal,
-      })
-    }
+    res = await fetch(req.url, {
+      method: 'POST',
+      headers: req.headers,
+      body: req.body,
+      signal: reqSignal,
+    })
   } catch (e) {
     return { ok: false, error: '请求失败：' + String((e as { message?: string } | undefined)?.message ?? e) }
   }
@@ -373,39 +526,7 @@ export async function warmOffline(options: OfflineWarmOptions): Promise<OfflineW
       ms,
     }
   }
-  /**
-   * ⚠️ **API 用 snake_case，DSH 内部用 camelCase** —— 直接当 camelCase 读会全是 0。
-   * 映射后 `inputTokens` = 未命中、`cacheReadTokens` = 命中（与插件侧口径一致）。
-   */
-  const u = json.usage ?? {}
-  const details = (u as Record<string, Record<string, number> | undefined>)['prompt_tokens_details']
-  const cached = u['cache_read_input_tokens']
-    ?? u['prompt_cache_hit_tokens']
-    ?? details?.['cached_tokens']
-    ?? 0
-  /**
-   * 两种协议口径不同：
-   * - **Anthropic**（DeepSeek 官方）：`input_tokens` 是**未命中**部分，总长 = input + read + write；
-   * - **OpenAI**：`prompt_tokens` 是**总长**，命中在 `prompt_tokens_details.cached_tokens`。
-   * 早先一律当总长处理 → `input_tokens=194 / read=207360` 被算成 0 未命中、命中率 100%（真实 99.9%）。
-   */
-  const isAnthropicStyle = u['cache_read_input_tokens'] !== undefined || u['cache_creation_input_tokens'] !== undefined
-  const promptAll = isAnthropicStyle
-    ? (u['input_tokens'] ?? 0) + cached + (u['cache_creation_input_tokens'] ?? 0)
-    : (u['prompt_tokens'] ?? 0)
-  const usage: OfflineUsage = {
-    // 口径统一：inputTokens = 未命中（不含新建缓存）
-    inputTokens: isAnthropicStyle
-      ? (u['input_tokens'] ?? 0)
-      : Math.max(0, promptAll - cached - (u['cache_creation_input_tokens'] ?? 0)),
-    outputTokens: u['output_tokens'] ?? u['completion_tokens'] ?? 0,
-    cacheReadTokens: cached,
-    cacheWriteTokens: u['cache_creation_input_tokens'] ?? 0,
-  }
-  usage.cacheKnown = u['cache_read_input_tokens'] !== undefined
-    || u['prompt_cache_hit_tokens'] !== undefined
-    || details?.['cached_tokens'] !== undefined
-  usage.totalTokens = (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.outputTokens ?? 0)
+  const usage = parseUsage(json.usage)
   return {
     ok: true,
     messages: plan.stats.messages,
