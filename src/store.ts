@@ -944,7 +944,36 @@ export function ledgerOf(state: State, sessionId: string): LedgerEntry[] {
  * **只绕熔断这一条**；预算 / 次数 / 闲置门槛 / 归档 / 路由 / 前缀变更全在 `gate.ts` 里，
  * 这里管不着也管不到（解熔不是「万能放行」）。
  */
-export type TripVerdict = 'ok' | 'rearmed' | 'tripped' | 'model-changed'
+export type TripVerdict = 'ok' | 'rearmed' | 'tripped' | 'model-changed' | 'recovering'
+
+/**
+ * **大上下文分档线**（token）：超过它才用「趋势」判据。
+ *
+ * DeepSeek 的缓存覆盖**按块推进**（实测步进 128K token）：71 万 token 的会话
+ * 第一次保温最多命中一块、第二次再多一块 —— 单看末条 `hitRate < threshold`
+ * 会把「正在推进」误判成「装配不一致」，于是熔断停保，缓存永远长不回来。
+ * 短会话一次就能填满，保持原来的严格单点判据。
+ */
+export const LARGE_PROMPT_TOKENS = 200_000
+
+/** 一条账本的总 prompt（三者互斥）。 */
+function promptOfEntry(e: LedgerEntry | undefined): number {
+  if (e === undefined) return 0
+  return (e.hitTokens ?? 0) + (e.missTokens ?? 0) + (e.cacheWriteTokens ?? 0)
+}
+
+/**
+ * **命中是否在单调上升**：`hitTokens` 涨了，且增量 ≥ 已命中部分的 10%、且 ≥ 1 块（1024）。
+ * 太小的抖动（几百 token）不算趋势，否则装配真的坏了也会被当成「在恢复」。
+ */
+function hitTrendUp(prev: LedgerEntry | undefined, last: LedgerEntry): boolean {
+  if (prev === undefined || prev.cacheUnknown === true || last.cacheUnknown === true) return false
+  const a = prev.hitTokens ?? 0
+  const b = last.hitTokens ?? 0
+  if (a <= 0 || b <= a) return false
+  const grew = b - a
+  return grew >= 1024 && grew * 10 >= a
+}
 
 export function tripVerdict(state: State, sessionId: string, threshold: number): TripVerdict {
   const led = ledgerOf(state, sessionId)
@@ -967,6 +996,17 @@ export function tripVerdict(state: State, sessionId: string, threshold: number):
    * 新模型上第二次还是低命中，说明装配/前缀真的对不上，照熔断（见 `tests/model-switch.test.mjs` D1b）。
    */
   if (modelChangedOf(prev, last)) return 'model-changed'
+  /**
+   * **大上下文看趋势（`recovering`）**：`prompt ≥ LARGE_PROMPT_TOKENS` 且命中比上一条
+   * 单调上升（增量 ≥ 已命中部分的 10%、且 ≥ 1 块）→ 说明缓存正按块推进，**不是装配不一致**。
+   *
+   * 为什么要这条：DeepSeek 的缓存覆盖按 128K 块推进，71 万 token 的会话第一次保温最多命中一块
+   * （实测 `ba6eb37a`：266,240 → 394,240，两次 body 逐字节相同）。单点 `hitRate < threshold`
+   * 会把「正在恢复」判成 `tripped` → 熔断停保 → 缓存永远长不回来（用户看到的 1.54% 就是这么来的）。
+   *
+   * **短会话不放宽**：`prompt < LARGE_PROMPT_TOKENS` 一次就能填满，仍走下面的严格单点判据。
+   */
+  if (promptOfEntry(last) >= LARGE_PROMPT_TOKENS && hitTrendUp(prev, last)) return 'recovering'
   const prevLow = prev !== undefined && prev.cacheUnknown !== true && (prev.hitRate ?? 0) < threshold
   if (prevLow) return 'tripped'
   /** 分母必须含「新建缓存」（三者互斥），否则 write 大的那次会被误判成「新建足够多」而放行。 */

@@ -217,11 +217,18 @@ function wireTools(tools: readonly unknown[]): unknown[] {
       description?: string
       parameters?: unknown
       input_schema?: unknown
+      deferLoading?: unknown
     }
     return {
       name: tool.name,
       ...(tool.description === undefined ? {} : { description: tool.description }),
       input_schema: tool.input_schema ?? tool.parameters ?? { type: 'object', properties: {} },
+      /**
+       * **与 DSH `dsh-llm/lib/types/content.js:258` 一致**：会话中途新增的工具（插件注册的）
+       * 发出去要带 `defer_loading: true`。漏了它，tools 段会从第一条新增工具处与真实请求断开
+       * —— 实测 `ba6eb37a` 因此只命中 11,008 / 713,796。
+       */
+      ...(tool.deferLoading === true ? { defer_loading: true } : {}),
     }
   })
 }

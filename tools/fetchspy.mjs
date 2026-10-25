@@ -158,6 +158,34 @@ function urlOf(input) {
   return ''
 }
 
+/**
+ * **请求头摘要（脱敏）** —— 只有 `CK_SPY_HEADERS=1` 时才产出。
+ *
+ * 为什么需要：实测「同一份 body（sha256 完全一致）」在两条路径上命中率差很多
+ * （CLI 直连 37%/55% vs 插件经 llm adapter 100%），body 已经排除，剩下的嫌疑就是 header。
+ *
+ * 脱敏规则（**绝不落明文**）：
+ *  - `authorization` / `x-api-key` / 任何含 key·token·secret·cookie 的头 → 只留前 7 字符 + `****`
+ *  - 其余头 → 只留**前 8 字符 + 值长度**（足够比对「两边是不是同一组/同一个值」，又拿不到全文）
+ */
+function headerDigest(input, init) {
+  if (process.env.CK_SPY_HEADERS !== '1') return null
+  const src = init?.headers ?? (typeof input === 'object' && input !== null ? input.headers : undefined)
+  if (src === undefined || src === null) return []
+  const pairs = []
+  if (typeof src.forEach === 'function' && typeof src.get === 'function') {
+    src.forEach((v, k) => pairs.push([String(k), String(v)]))
+  } else if (Array.isArray(src)) {
+    for (const it of src) if (Array.isArray(it)) pairs.push([String(it[0]), String(it[1])])
+  } else if (typeof src === 'object') {
+    for (const [k, v] of Object.entries(src)) pairs.push([String(k), String(v)])
+  }
+  const SECRET = /authorization|x-api-key|api-key|cookie|token|secret/i
+  return pairs.map(([k, v]) => (SECRET.test(k)
+    ? { name: k, len: v.length, preview: v.slice(0, 7) + '****' }
+    : { name: k, len: v.length, preview: v.slice(0, 8) }))
+}
+
 function methodOf(input, init) {
   const raw = init?.method ?? (typeof input === 'object' && input !== null ? input.method : undefined) ?? 'GET'
   return String(raw).toUpperCase()
@@ -441,7 +469,9 @@ function install() {
           bodyForm: formOf(rawBody),
           profile: profile ?? null,
           argv: process.argv.slice(0, 10),
-          note: '请求头一律不落盘',
+          /** `CK_SPY_HEADERS=1` 才有值；内容已脱敏（见 headerDigest）。 */
+          headers: headerDigest(input, init),
+          note: '请求头默认不落盘；CK_SPY_HEADERS=1 时只落脱敏摘要（名前缀 8 字符 + 值长度）',
         }, null, 2))
       }
 

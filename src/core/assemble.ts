@@ -154,7 +154,18 @@ export function wireToolsOf(toolHistory: ToolHistory): ToolDecl[] {
   const declarations = new Map<string, ToolDecl>()
   for (const tool of toolHistory.tools) declarations.set(tool.name, tool)
   for (const update of toolHistory.updates) {
-    for (const tool of update.additions) if (!declarations.has(tool.name)) declarations.set(tool.name, tool)
+    for (const tool of update.additions) {
+      if (declarations.has(tool.name)) continue
+      /**
+       * **后来新增的工具要标 `deferLoading`** —— 与 DSH `dsh-llm/lib/types/content.js:258`
+       * （`declarations.set(tool.name, { ...tool, deferLoading: true })`）逐字一致。
+       *
+       * 发出去就是 `defer_loading: true`（每条多 21 字节）。**漏了这条，tools 段会从第一条
+       * 新增工具处与真实请求断开**：实测会话 `ba6eb37a`，插件发的 body 69,415 字符、
+       * 离线只 68,491 字符（差 44 × 21 = 924），缓存命中止于 tools[40] 之前 ≈ 11,008 token。
+       */
+      declarations.set(tool.name, { ...tool, deferLoading: true })
+    }
   }
   return [...declarations.values()]
 }
