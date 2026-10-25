@@ -1162,7 +1162,11 @@ async function sendWarmInner(r) {
       prompt: r.prompt,
       dshHome: DSH_HOME,
       maxTokens: WARM_MAX_TOKENS,
-      refuseImages: true,
+      /**
+       * 图片块读不到字节时**默认拒绝**（那条之后的前缀永远命中不了，白烧钱还会污染缓存）；
+       * 但 `--force` 的语义就是「用户已明确要求，别再拦」—— 与上面门禁那条一致，放行。
+       */
+      refuseImages: !process.argv.includes('--force'),
     })
     return {
       ok: out.ok === true && out.usage !== undefined,

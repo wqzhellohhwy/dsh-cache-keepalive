@@ -1090,7 +1090,15 @@ function mergeState(mem: State, disk: State): State {
      * 并不保证同源，静默兜底会花真钱、却让人以为"保温成功"（实测一条会话 713,796 token 只命中 11,008）。
      */
     const canFallback = !llmErr.startsWith('装配失败：')
-      && (plan === null || /UNSUPPORTED_|not supported|不支持/iu.test(llmErr))
+      && (plan === null
+        || /UNSUPPORTED_|not supported|不支持/iu.test(llmErr)
+        /**
+         * **adapter 跑完了但没给 usage**：`runReplay` 依赖 chunk 里带 `usage`，实测有的路由
+         * 只回 `finish`（`1f64b53f` 走 tokenrhythm 就是这样）—— 这不是「装配/序列化异常」，
+         * 而是**取不到计量**，必须允许落自拼兜底，否则 panel 路径会整条瘫掉
+         * （实测报错「离线保温放弃（不走自拼请求体兜底）：没有拿到 usage（最后一个 chunk 类型：finish）」）。
+         */
+        || /没有拿到 usage/u.test(llmErr))
     if (!canFallback) {
       return {
         result: '离线保温放弃（不走自拼请求体兜底）：' + (llmErr === '' ? '未知原因' : llmErr),
