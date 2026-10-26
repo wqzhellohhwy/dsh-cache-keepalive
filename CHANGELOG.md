@@ -15,10 +15,46 @@
 
 
 
-> 归档：`changelog/2026-10.md`（63 条）
 > ⚠️ 2026-10-25 13:28 目录清空事故导致冷层正文不可恢复：原声明 **269 条**，其中 **217 条**的条目头与**全部 269 条**的原始正文已丢失；现重建出 **63 条**（52 条可证条目头 + 9 条 2026-10-26 真实提交 + 2 条汇总级），详见 changelog/2026-10.md 顶部说明
 > ⚠️ 2026-10-26 仓库 git 历史重建（旧 `.git` 对象损坏），此前条目里的 commit 锚（`· <hash>`）已无法 `cat-file` 命中，属历史断档，不是记录错误。
 
+> 归档：`changelog/2026-10.md`（75 条）
+
+## 2026-10-26 06:33 — 改价后详情重拉 + --log-file + lnk 指向 bat · 04073e3
+
+验证：`node scripts/test-run.mjs`
+## 2026-10-26 06:02 — 补回 5 个丢失文件 + 启动器三档规范化 · e036c68
+
+验证：`node scripts/test-run.mjs`
+详见 changelog/2026-10.md 同名条目
+## 2026-10-26 03:44 — canFallback 放宽 + cli --force 穿透图片检查 · 9b9c916
+
+验证：`node --test tests/cli-force-images.test.mjs`
+详见 changelog/2026-10.md 同名条目
+## 2026-10-26 02:03 — 补回 defer_loading + store 加 recovering · 25988f4
+
+验证：`node --test tests/defer-loading.test.mjs tests/trip-large-prompt.test.mjs`
+详见 changelog/2026-10.md 同名条目
+## 2026-10-26 01:03 — 修宿主 /state 500「row is not defined」 · c2a8288
+
+验证：`node --test tests/host-snapshot-smoke.test.mjs`
+详见 changelog/2026-10.md 同名条目
+## 2026-10-26 00:42 — anthropic 分支 stream:true + body 形状回归 · 2cb9094
+
+验证：`node --test tests/wire-parity.test.mjs tests/wire-responses.test.mjs`
+详见 changelog/2026-10.md 同名条目
+## 2026-10-26 00:14 — 补回三协议/子代理/互斥/指纹一批功能 · b0839f8
+
+验证：`node --test tests/wire-parity.test.mjs tests/subagent-auto.test.mjs`
+详见 changelog/2026-10.md 同名条目
+## 2026-10-25 22:37 — 移除恢复残留 ~RF*.TMP（两批） · e611126
+
+验证：`git ls-files | Select-String -Pattern '~RF.*\.TMP$'`（同批第二批 e3fd64f 22:38）
+详见 changelog/2026-10.md 同名条目
+## 2026-10-25 22:37 — 插件源码全量重建（10-25 基线） · 955b7d7
+
+验证：`node scripts/test-run.mjs`
+详见 changelog/2026-10.md 同名条目
 ## 2026-10-25 13:08 — 尾部读合并自适应 测试守卫改skip · 6b1095a
 
 验证：`node --test tests/session-model-tail.test.mjs`
@@ -40,9 +76,6 @@
 ## 2026-10-25 08:16 — 改价后展示花费全按现价 判定仍用账本 · bef4920
 
 验证：`node --test tests/timeline-warm-price.test.mjs`
-## 2026-10-25 07:31 — 端口起点回到 19388 pm2 与普通启动共用 · 2d3b8cf
-## 2026-10-25 07:22 — 端口按 home 分五槽 已有实例给菜单 vbs 与 lnk 入口 · 0fa0f59
-## 2026-10-25 06:18 — 六个启停脚本合三成四 性能 7 倍 修误杀与挂死 · 02635d4
 ## 2026-10-25 04:25 — 间隔门槛 per-model 同源 + 子代理总开关 + 改价重算
 
 验证：`node --test tests/per-model-price.test.mjs`
@@ -78,29 +111,3 @@
 ## 2026-10-24 18:26 — 门禁文案长闲置二档（>9999 分钟）全档可编辑 新增码自动出现
 
 验证：`node --test tests/gate-texts-long.test.mjs`
-## 2026-10-24 09:28 — 后端补 modelOverrides 分支 面板保存不再白改
-
-验证：`node --test tests/settings.test.mjs`
-tests/settings.test.mjs 补一条纯函数用例守住这个洞
-## 2026-10-24 09:18 — 价表合并成一颗保存按钮 并回面板外门槛键 贴行改精确匹配
-
-验证：`node --test tests/panel-model-rows.test.mjs`
-并回时键按小写归一（大小写不同的旧键也能清空）
-## 2026-10-24 08:29 — 价表下拉改 min-width 长 provider 名不再截断
-
-验证：`node --test tests/panel-model-rows.test.mjs`
-## 2026-10-24 08:19 — 价表手填关不掉修复 选项池并现有数据 离线目录补内置
-
-验证：`node --test tests/panel-model-rows.test.mjs`
-守线改归一化逐字节比较（仅归一选项池与行类）
-## 2026-10-24 06:55 — chrome-real 泄漏止血：close 只杀启动器
-
-验证：`node --test tests/chrome-real.test.mjs`
-## 2026-10-24 05:46 — 价表手填改行类零增删 拆两个保存按钮 空名重名中止
-
-验证：`node --test tests/panel-model-rows.test.mjs`
-## 2026-10-24 05:46 — 价表测试改标准 node:test 补回 R7 开关与 R8 价格框守线
-
-验证：`node --test tests/panel-model-rows.test.mjs`
-## 2026-10-24 02:16 — 价表裸模型名反查 provider 自动补全 · f3a5945
-## 2026-10-24 01:27 — 修 dshHome TDZ 致模型目录只剩在线 2 个 · c210b4d

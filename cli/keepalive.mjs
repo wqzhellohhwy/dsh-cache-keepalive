@@ -690,6 +690,12 @@ function gateInputForRow(state, row, hasRoute, at = Date.now(), extra = {}) {
     hasRoute,
     tripped: trippedNow(state, row.id, row.mtime),
     at,
+    /**
+     * **CLI 比插件晚一拍**：`LOOP_OFFSET_MS`（90 秒）就是「等插件先保」的时间量。
+     * 作为门禁的 `delayMs` 传下去，`decideWarm` 会把它加进间隔门槛 —— 否则 CLI 与插件会对
+     * 同一条会话各保一次（双花一次钱）。子代理在 `decideWarm` 里不吃这段延后（`tests/auto-subagent.test.mjs` 的 B5b 守）。
+     */
+    delayMs: LOOP_OFFSET_MS,
     ...extra,
   })
 }

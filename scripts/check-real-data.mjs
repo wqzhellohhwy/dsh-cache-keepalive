@@ -70,8 +70,22 @@ for (let i = 0; i < 24 * 60; i += 1) {
   const p = effectivePrices(DEFAULT_PRICES, 'deepseek-flash', {}, t, ts)
   if (p.factor === 2) peakMin += 1
 }
-say(peakMin === 16 * 60, `默认时段表：高峰占 ${peakMin / 60} 小时（应 16）`)
-say(24 * 60 - peakMin === 8 * 60, `默认时段表：空闲占 ${(24 * 60 - peakMin) / 60} 小时（应 8）`)
+/**
+ * 期望时长**从 `DEFAULT_TARIFF.slots` 动态推导**，不写死小时数 —— 否则每次改默认时段表
+ * 这条自检都会红（2026-10-26 从「高峰 16h/空闲 8h」改成「7h/17h」时就红了）。
+ */
+const slotMinutes = (s) => {
+  const [fh, fm] = String(s.from).split(':').map(Number)
+  const [th, tm] = String(s.to).split(':').map(Number)
+  const from = fh * 60 + fm
+  const to = th * 60 + tm
+  /** `to <= from` 表示跨零点。 */
+  return to > from ? to - from : 24 * 60 - from + to
+}
+const peakExpect = DEFAULT_TARIFF.slots.filter((s) => s.factor > 1).reduce((n, s) => n + slotMinutes(s), 0)
+const offExpect = 24 * 60 - peakExpect
+say(peakMin === peakExpect, `默认时段表：高峰占 ${peakMin / 60} 小时（按 DEFAULT_TARIFF 推导应为 ${peakExpect / 60}）`)
+say(24 * 60 - peakMin === offExpect, `默认时段表：空闲占 ${(24 * 60 - peakMin) / 60} 小时（应为 ${offExpect / 60}）`)
 
 console.log('')
 console.log(fail === 0 ? '✅ 真实数据自检全绿' : `❌ ${fail} 项失败`)
